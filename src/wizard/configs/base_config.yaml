@@ -122,6 +122,7 @@ services:
     volumes:
       - "${scenes.scene_cache}:/mnt/nre-data"
       - "${defines.sensordata}/ego-hoods:/mnt/ego-hoods"
+      - "${wizard.log_dir}/nre_cache:/tmp/nre-cache-dir"
     # \/ environments lets you set environment variables inside the container
     environments:
       # this may not be necessary but at least on COLOSSUS by default pytorch had really stupid
@@ -157,6 +158,7 @@ services:
       - "--config-name=driver-config.yaml"
       - "host=0.0.0.0"
       - "port={port}"
+      - "hydra.run.dir=/mnt/output/driver_logs_{port}"
 
   physics:
     image: ${defines.base_image}
@@ -164,6 +166,7 @@ services:
       - "${scenes.scene_cache}:/mnt/nre-data"
       - "${repo-relative:'src'}:/repo/src"
       - "${repo-relative:'plugins'}:/repo/plugins"
+      - "${wizard.log_dir}/warp_cache:/mnt/warp"
     environments:
       - WARP_CACHE_PATH='/mnt/warp'
     command:

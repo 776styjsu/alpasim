@@ -99,6 +99,71 @@ async def convert_single_log(
 
     await aios.makedirs(save_dir, exist_ok=True)
 
+    # --- GEOMETRY EXTRACTION BLOCK ---
+    try:
+        from omegaconf import OmegaConf
+        from eval.schema import EvalConfig
+        from eval.data import SimulationResult
+        from eval.accumulator import EvalDataAccumulator
+        from alpasim_utils.artifact import Artifact
+        import os
+
+        logger.info("Initializing evaluation models for geometry generation...")
+        import glob
+        artifacts = {}
+        for path in glob.glob("data/**/*.usdz", recursive=True):
+            try:
+                a = Artifact(path, _smooth_trajectories=True)
+                if a.scene_id not in artifacts:
+                    artifacts[a.scene_id] = a
+            except Exception:
+                pass
+        
+        eval_cfg = OmegaConf.structured(EvalConfig)
+        acc = EvalDataAccumulator(cfg=eval_cfg)
+        
+        async for m in async_read_pb_log(log_path):
+            acc.handle_message(m)
+            
+        scene_id = rollout_metadata.session_metadata.scene_id if rollout_metadata and rollout_metadata.session_metadata else "unknown"
+        vec_map = artifacts[scene_id].map if scene_id in artifacts else None
+        scenario_input = acc.build_scenario_eval_input("extract", "extract", "0", vec_map)
+        sim_result = SimulationResult.from_scenario_input(scenario_input, eval_cfg)
+        
+        all_timestamps = set()
+        for images_list in frames_by_camera.values():
+            for img in images_list:
+                all_timestamps.add(img.frame_start_us)
+        
+        sorted_timestamps = sorted(list(all_timestamps))
+        
+        logger.info("Generating top-down geometry views...")
+        bev_save_dir = f"{save_dir}/geometry_bev"
+        await aios.makedirs(bev_save_dir, exist_ok=True)
+        
+        for ts in sorted_timestamps:
+            out_img = f"{bev_save_dir}/{ts}.png"
+            render_eval_visualization_and_extract_geometry(sim_result, eval_cfg, ts, out_img)
+            
+        if format == "mp4":
+            import imageio.v3 as iio
+            bev_images = []
+            for ts in sorted_timestamps:
+                img_path = f"{bev_save_dir}/{ts}.png"
+                if os.path.exists(img_path):
+                    # using the pad function from earlier
+                    bev_images.append(pad_to_divisible_by_16(iio.imread(img_path)))
+            
+            if bev_images:
+                duration_us = sorted_timestamps[-1] - sorted_timestamps[0] if len(sorted_timestamps) > 1 else 1e6
+                average_fps = max(1, len(sorted_timestamps) / (duration_us / 1e6))
+                iio.imwrite(f"{bev_save_dir}.mp4", image=bev_images, extension=".mp4", fps=average_fps)
+                logger.info(f"Saved BEV geometry MP4 to {bev_save_dir}.mp4")
+
+    except Exception as e:
+        logger.warning(f"Could not extract geometry/simulate eval: {e}")
+    # --- END GEOMETRY EXTRACTION BLOCK ---
+
     for camera_logical_id, images in frames_by_camera.items():
         camera_name = camera_logical_id
         save_path = f"{save_dir}/{camera_name}"
@@ -241,3 +306,101 @@ if __name__ == "__main__":
             args.asl_glob, format=args.format, log_save_dir=args.log_save_dir
         )
     )
+
+def render_eval_visualization_and_extract_geometry(sim_result, cfg, time_now_us_target, output_image_path):
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+    import matplotlib.style as mplstyle
+    import json
+    from pathlib import Path
+    
+    mpl.use("Agg")
+    mplstyle.use("fast")
+    try:
+        from eval.video import get_ego_transform
+        from eval.video_data import ShapelyMap
+        from eval.schema import MapElements
+    except ImportError:
+        logger.error("eval package unavailable. Make sure 'eval' is in PYTHONPATH.")
+        return
+
+    
+    if hasattr(sim_result, "actor_polygons") and sim_result.actor_polygons:
+        sim_result.actor_polygons.artists = {}
+    if hasattr(sim_result, "route") and sim_result.route:
+        sim_result.route.artists = None
+    if hasattr(sim_result, "driver_responses") and sim_result.driver_responses:
+        sim_result.driver_responses.artists = None
+
+    fig, ax = plt.subplots(figsize=(10, 10), dpi=100)
+    # Using white background to match standard eval video
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, linestyle="--", alpha=0.3, color="#dddddd")
+
+    shapely_map = ShapelyMap.from_vec_map(sim_result.vec_map) if sim_result.vec_map else None
+    ego_transform = get_ego_transform(sim_result=sim_result, cfg=cfg, time=time_now_us_target)
+    
+    image_center_xy = sim_result.actor_polygons.set_axis_limits_around_agent(
+        ax, "EGO", time_now_us_target, cfg, axis_transform=ego_transform
+    )
+
+    if shapely_map:
+        shapely_map.render(
+            ax, cfg, center=image_center_xy, max_dist=cfg.video.map_video.map_radius_m + 10
+        )
+
+    if cfg.video.map_video.map_elements_to_plot is None or MapElements.GT_LINESTRING in cfg.video.map_video.map_elements_to_plot:
+        sim_result.ego_recorded_ground_truth_trajectory.set_linestring_plot_style(
+            "gt_linestring", linewidth=1, style="g-", alpha=0.7
+        ).render_linestring(ax)
+
+    if cfg.video.map_video.map_elements_to_plot is None or MapElements.AGENTS in cfg.video.map_video.map_elements_to_plot:
+        sim_result.actor_polygons.render_at_time(
+            ax, time_now_us_target, center=image_center_xy, max_dist=cfg.video.map_video.map_radius_m + 10
+        )
+    else:
+        sim_result.actor_polygons.render_at_time(ax, time_now_us_target, only_agents=["EGO"])
+
+    if cfg.video.map_video.map_elements_to_plot is None or MapElements.DRIVER_RESPONSES in cfg.video.map_video.map_elements_to_plot:
+        if hasattr(sim_result, "driver_responses"):
+            sim_result.driver_responses.render_at_time(ax, time_now_us_target, "now")
+
+    if (cfg.video.map_video.map_elements_to_plot is None or MapElements.ROUTE in cfg.video.map_video.map_elements_to_plot) and hasattr(sim_result, 'routes'):
+        sim_result.routes.render_at_time(ax, time_now_us_target)
+
+    if image_center_xy:
+        r = cfg.video.map_video.map_radius_m
+        ax.set_xlim(image_center_xy.x - r, image_center_xy.x + r)
+        ax.set_ylim(image_center_xy.y - r + 0.3*r, image_center_xy.y + r + 0.3*r)
+    fig.savefig(output_image_path, facecolor=fig.get_facecolor(), edgecolor="none")
+    plt.close(fig)
+
+    # Extract geometry to JSON
+    geometry_path = Path(output_image_path).with_name(f"{Path(output_image_path).stem}_geometry.json")
+    try:
+        geometry_data = {
+            "timestamp_us": int(time_now_us_target),
+            "map_linestrings": [],
+            "actors": []
+        }
+        if shapely_map:
+            for ls in shapely_map.renderable_linestrings:
+                geometry_data["map_linestrings"].append({
+                    "type": str(ls.name),
+                    "coords": list(ls.linestring.coords)
+                })
+        
+        polys_at_time = sim_result.actor_polygons.get_polygons_at_time(time_now_us_target)
+        for agent_id, poly, yaw in zip(polys_at_time.agent_ids, polys_at_time.bbox_polygons, polys_at_time.yaws):
+            geometry_data["actors"].append({
+                "id": agent_id,
+                "yaw": float(yaw),
+                "polygon_coords": list(poly.exterior.coords)
+            })
+
+        with open(geometry_path, "w") as f:
+            json.dump(geometry_data, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to extract geometry JSON: {e}")
