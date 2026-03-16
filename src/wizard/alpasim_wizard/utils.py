@@ -180,6 +180,40 @@ def ensure_sqsh_path(
         return os.path.abspath(sqsh_path)
 
 
+def image_url_to_sif_filename(image: str, sif_caches: list[str]) -> str:
+    """Converts a docker image URL to a canonical SIF filename used for Apptainer caches."""
+    sif_fname = os.path.basename(image).replace(":", "_").replace("-", "_") + ".sif"
+    sif_paths = [os.path.join(sif_cache, sif_fname) for sif_cache in sif_caches]
+
+    for sif_path in sif_paths:
+        if os.path.isfile(sif_path):
+            return sif_path
+
+    raise ValueError(f"Could not find file: {sif_fname} at {sif_paths=}.")
+
+
+def image_url_to_apptainer_image(image: str, apptainer_caches: list[str]) -> str:
+    """Resolve an Apptainer image from cache, supporting both .sif files and sandbox directories."""
+    image_stem = os.path.basename(image).replace(":", "_").replace("-", "_")
+    candidate_paths: list[str] = []
+    for cache_dir in apptainer_caches:
+        candidate_paths.extend(
+            [
+                os.path.join(cache_dir, f"{image_stem}.sif"),
+                os.path.join(cache_dir, f"{image_stem}.sandbox"),
+                os.path.join(cache_dir, image_stem),
+            ]
+        )
+
+    for candidate_path in candidate_paths:
+        if os.path.isfile(candidate_path) or os.path.isdir(candidate_path):
+            return candidate_path
+
+    raise ValueError(
+        f"Could not find Apptainer image for {image!r} in {apptainer_caches=!r}."
+    )
+
+
 def _process_config_values_for_saving(node: Any) -> Any:
     """Helper function to recursively process config values before saving."""
     if isinstance(node, dict):

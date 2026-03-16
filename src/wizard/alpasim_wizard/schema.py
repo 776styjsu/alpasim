@@ -69,6 +69,7 @@ class ScenesConfig:
 class RunMethod(Enum):
     SLURM = "slurm"
     DOCKER_COMPOSE = "docker_compose"
+    APPTAINER = "apptainer"
     NONE = "none"
 
 
@@ -111,6 +112,7 @@ class WizardConfig:
     vscode: str = MISSING
 
     sqshcaches: list[str] = MISSING
+    sif_caches: list[str] = field(default_factory=list)
 
     slurm_job_id: int | None = MISSING
     timeout: int = MISSING

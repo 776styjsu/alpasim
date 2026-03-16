@@ -170,6 +170,11 @@ class ContainerDefinition:
 
         if getattr(context.cfg.wizard, "validate_mount_points", False):
             for volume in volumes:
+                try:
+                    os.makedirs(volume.host, exist_ok=True)
+                except PermissionError:
+                    # Can't create, we'll let it fail the exist check
+                    pass
                 if not volume.host_exists():
                     raise FileNotFoundError(
                         f"Mount point does not exist: {volume.host}"
