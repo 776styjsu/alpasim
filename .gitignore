@@ -35,6 +35,7 @@ benchmark_llm_matrix/
 # AI stuff
 .claude
 .codex
+.agents/skills/iad-slurm
 .serena
 .zed
 CLAUDE.md
@@ -46,6 +47,10 @@ CLAUDE.md
 src/tools/run-on-slurm/runs
 src/tools/run-on-slurm/outputs
 data/drivers/*
+data/alpackages/*
+data/huggingface
+data/vavam-driver
+data/trafficsim-models/
 outputs/
 artifacts/
 asset_harvesting/
