@@ -185,12 +185,15 @@ class ApptainerDeployment:
             parts.append(f"--bind {v.to_str()}")
 
         # Set the working directory based on the container image
-        is_nurec = "nvidia_nurec" in image
+        is_old_nurec = "nvidia_nurec" in image
+        is_new_nre = any(s in image for s in ("nre_ga", "nre-ga", "/nre/"))
 
         if container.workdir:
             parts.append(f"--pwd {container.workdir}")
-        elif is_nurec:
+        elif is_old_nurec:
             parts.append("--pwd /app/pycena_run.runfiles/nre_repo")
+        elif is_new_nre:
+            parts.append("--pwd /app/internal/scripts/pycena/runtime/pycena_run.runfiles/_main")
         else:
             parts.append("--pwd /repo")
 
@@ -202,14 +205,41 @@ class ApptainerDeployment:
                 # Pass-through from host: VAR → --env VAR=$VAR
                 parts.append(f"--env {e}=${{{e}}}")
 
-        if not is_nurec:
+        if not (is_old_nurec or is_new_nre):
             # Force uv to use the container's environment instead of the host's $PWD/.venv
             parts.append("--env UV_PROJECT_ENVIRONMENT=/repo/.venv")
             # Prevent Python from writing __pycache__ files over the slow FUSE/network mount
             parts.append("--env PYTHONDONTWRITEBYTECODE=1")
 
-        # Writable tmpfs overlay so services can write to non-bound paths
-        parts.append("--writable-tmpfs")
+        # Writable scratch for runtime writes outside bind-mounts.
+        # NRE containers need a large writable area because the entrypoint
+        # creates a Bazel-runfiles venv with thousands of symlinks; this
+        # overflows --writable-tmpfs (kernel tmpfs is small; symlink returns
+        # ENOMEM). A bind mount at the venv root also fails because the venv
+        # tool wipes its own root before recreating, and you can't rmdir a
+        # mount point (EBUSY). A directory --overlay tends to fail on GPFS
+        # since overlayfs uppers need xattr support GPFS lacks.
+        # File-backed --overlay (ext3 in a regular file on GPFS) sidesteps
+        # all of these: full POSIX semantics regardless of underlying FS,
+        # and the venv root inside the overlay is a plain directory the tool
+        # can remove and recreate freely. We create the .img lazily in the
+        # dispatched bash command so re-runs are idempotent.
+        if is_old_nurec or is_new_nre:
+            port = container.service_instances[0].address.port
+            overlay_img = (
+                Path(self.context.cfg.wizard.log_dir)
+                / "nre_overlays"
+                / f"{container.name}_{port}.img"
+            )
+            overlay_img.parent.mkdir(parents=True, exist_ok=True)
+            create_step = (
+                f"[ -f {overlay_img} ] || "
+                f"apptainer overlay create --size 4096 {overlay_img};"
+            )
+            parts.insert(1, create_step)
+            parts.append(f"--overlay {overlay_img}")
+        else:
+            parts.append("--writable-tmpfs")
 
         # Image
         parts.append(image)

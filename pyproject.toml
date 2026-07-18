@@ -35,8 +35,12 @@ all = [
   "alpasim_wizard",
 ]
 
-# -- Plugin extras --
+# -- Plugin and experiment extras --
 transfuser = ["alpasim_transfuser"]
+qwen-vllm = [
+  "huggingface_hub>=0.30.0",
+  "vllm>=0.9.0",
+]
 
 [tool.uv.workspace]
 members = [
@@ -68,7 +72,7 @@ alpasim_transfuser = { workspace = true }
 alpasim_wizard = { workspace = true }
 
 [tool.uv]
-python-preference = "only-managed"
+python-preference = "managed"
 exclude-newer = "3 days"
 override-dependencies = [
   # flash-attention is an AR1/A1.5 dependency, but it doesn't work with uv

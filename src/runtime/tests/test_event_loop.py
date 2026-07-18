@@ -29,6 +29,7 @@ def test_initial_event_schedule_matches_control_timestamps() -> None:
     rollout.planner_delay_buffer = MagicMock()
     rollout.route_generator = None
     rollout.sensorsim = MagicMock()
+    rollout.consistency_monitor = None
 
     queue = rollout._create_initial_events()
     events = list(queue.queue)

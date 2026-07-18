@@ -26,7 +26,7 @@ dependencies = [
     "protobuf",
     "grpcio",
     "scipy",
-    "google-genai",
+    "openai",
     "pytest",
     "black",
     "ruff",

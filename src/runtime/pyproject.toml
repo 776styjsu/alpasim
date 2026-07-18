@@ -39,6 +39,7 @@ dependencies = [
     "grpcio>=1.70.0",
     "pytest-grpc>=0.8.0",
     "pyyaml>=6.0.2",
+    "openai>=1.0.0",  # online CoT-consistency monitor judge client (lazy-imported)
 ]
 
 [tool.uv.sources]

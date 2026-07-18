@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+from alpasim_runtime.consistency_monitor import ConsistencyMonitor
 from alpasim_runtime.events.base import EventPriority, EventQueue, RecurringEvent
 from alpasim_runtime.events.state import RolloutState, ServiceBundle
 from alpasim_runtime.route_generator import RouteGenerator
@@ -39,6 +40,7 @@ class PolicyEvent(RecurringEvent):
         camera_ids: list[str],
         route_generator: RouteGenerator | None,
         send_recording_ground_truth: bool,
+        consistency_monitor: ConsistencyMonitor | None = None,
     ):
         super().__init__(timestamp_us=timestamp_us)
         self.interval_us = policy_timestep_us
@@ -46,6 +48,7 @@ class PolicyEvent(RecurringEvent):
         self.camera_ids = camera_ids
         self.route_generator = route_generator
         self.send_recording_ground_truth = send_recording_ground_truth
+        self.consistency_monitor = consistency_monitor
 
     async def run(self, state: RolloutState, queue: EventQueue) -> None:
         step_start_us = self.timestamp_us
@@ -114,18 +117,113 @@ class PolicyEvent(RecurringEvent):
         state.last_egopose_update_us = step_start_us
 
         # --- Driver query ---
-        drive_trajectory_noisy = await svc.driver.drive(
-            time_now_us=step_start_us,
-            time_query_us=target_time_us,
-            renderer_data=state.data_sensorsim_to_driver,
-        )
+        renderer_data = state.data_sensorsim_to_driver
         state.data_sensorsim_to_driver = None  # Consumed
 
-        # --- Transform from noisy to true local frame ---
-        drive_trajectory = transform_trajectory_from_noisy_to_true_local_frame(
-            state, drive_trajectory_noisy
-        )
+        monitor = self.consistency_monitor
+        if monitor is not None and monitor.should_monitor_step():
+            drive_trajectory = await self._drive_with_consistency_monitor(
+                svc, state, step_start_us, target_time_us, renderer_data, monitor
+            )
+        else:
+            drive_trajectory_noisy = await svc.driver.drive(
+                time_now_us=step_start_us,
+                time_query_us=target_time_us,
+                renderer_data=renderer_data,
+            )
+            # --- Transform from noisy to true local frame ---
+            drive_trajectory = transform_trajectory_from_noisy_to_true_local_frame(
+                state, drive_trajectory_noisy
+            )
+
         state.step_context.driver_trajectory = drive_trajectory
+
+    async def _drive_with_consistency_monitor(
+        self,
+        svc: ServiceBundle,
+        state: RolloutState,
+        step_start_us: int,
+        target_time_us: int,
+        renderer_data: bytes | None,
+        monitor: ConsistencyMonitor,
+    ) -> geometry.Trajectory:
+        """Sample-then-judge loop: pick a CoT-consistent trajectory to execute.
+
+        Re-samples the driver up to ``max_samples`` times. Each sample is a fresh
+        stochastic (CoT, trajectory). Executes the first sample whose judge score
+        clears ``accept_threshold``; otherwise the highest-scored sample. If a
+        sample cannot be judged (no CoT / too short / backend error), falls back
+        to the best judged sample so far, or that sample when none were judged
+        (today's single-call behaviour). The alpamayo driver ignores
+        ``renderer_data`` and reuses cached frames, so resampling is safe; it is
+        sent only on the first attempt to mirror the single-call path.
+        """
+        max_samples = max(1, monitor.config.max_samples)
+        best_traj: geometry.Trajectory | None = None
+        best_score: float | None = None
+        best_attempt = -1
+        last_traj: geometry.Trajectory | None = None
+        attempts: list[dict] = []
+
+        for attempt in range(max_samples):
+            outcome = await svc.driver.drive_with_debug(
+                time_now_us=step_start_us,
+                time_query_us=target_time_us,
+                renderer_data=renderer_data if attempt == 0 else None,
+            )
+            drive_trajectory = transform_trajectory_from_noisy_to_true_local_frame(
+                state, outcome.trajectory
+            )
+            last_traj = drive_trajectory
+            result = monitor.judge(drive_trajectory, outcome.reasoning_text)
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "judged": result.judged,
+                    "score": result.score,
+                    "has_cot": bool(outcome.reasoning_text),
+                    "error": result.error,
+                }
+            )
+
+            if result.judged and result.score is not None:
+                # Prefer the later sample on score ties ("last highest scored").
+                if best_score is None or result.score >= best_score:
+                    best_score, best_traj, best_attempt = (
+                        result.score,
+                        drive_trajectory,
+                        attempt,
+                    )
+                if monitor.is_accepted(result):
+                    break
+            else:
+                # Cannot judge this sample: stop resampling. Keep the best judged
+                # sample so far, or execute this one if none were judged.
+                if best_traj is None:
+                    best_traj, best_attempt = drive_trajectory, attempt
+                break
+
+        chosen_traj = best_traj if best_traj is not None else last_traj
+        monitor.append_audit(
+            {
+                "time_now_us": step_start_us,
+                "num_attempts": len(attempts),
+                "chosen_attempt": best_attempt,
+                "chosen_score": best_score,
+                "accept_threshold": monitor.config.accept_threshold,
+                "attempts": attempts,
+            }
+        )
+        logger.info(
+            "consistency_monitor: t=%dus attempts=%d chosen_attempt=%d "
+            "chosen_score=%s scores=%s",
+            step_start_us,
+            len(attempts),
+            best_attempt,
+            best_score,
+            [a["score"] for a in attempts],
+        )
+        return chosen_traj
 
 
 # ---------------------------------------------------------------------------

@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 import logging
+import pickle
 import random
+from dataclasses import dataclass
 from typing import Type
 
 import numpy as np
@@ -38,6 +40,39 @@ from alpasim_utils.geometry import (
 from alpasim_utils.types import ImageWithMetadata
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class DriveOutcome:
+    """A single drive decision plus the model's chain-of-thought.
+
+    ``reasoning_text`` is the driver model's chain-of-causation, which the
+    online consistency monitor judges against ``trajectory``. It is ``None`` when
+    the model produced no reasoning (e.g. warmup steps) or in the skip/dry path.
+    """
+
+    trajectory: Trajectory
+    reasoning_text: str | None
+
+
+def _reasoning_text_from_response(response: DriveResponse) -> str | None:
+    """Unpickle the chain-of-thought from a DriveResponse debug payload.
+
+    The driver pickles a debug dict into
+    ``response.debug_info.unstructured_debug_info`` with a ``reasoning_text``
+    key (see alpasim_driver.main). Returns None if absent or unreadable.
+    """
+    try:
+        payload = response.debug_info.unstructured_debug_info
+        if not payload:
+            return None
+        debug = pickle.loads(payload)
+    except Exception:
+        return None
+    if isinstance(debug, dict):
+        text = debug.get("reasoning_text")
+        return text if isinstance(text, str) else None
+    return None
 
 
 class DriverService(ServiceBase[EgodriverServiceStub]):
@@ -211,6 +246,18 @@ class DriverService(ServiceBase[EgodriverServiceStub]):
         Returns:
             Trajectory containing the selected trajectory for the ego vehicle.
         """
+        outcome = await self.drive_with_debug(time_now_us, time_query_us, renderer_data)
+        return outcome.trajectory
+
+    async def drive_with_debug(
+        self, time_now_us: int, time_query_us: int, renderer_data: bytes | None
+    ) -> DriveOutcome:
+        """Request a drive decision and return it with the model's reasoning.
+
+        Same RPC as :meth:`drive`, but also surfaces the chain-of-thought from
+        the response debug payload so the online consistency monitor can judge
+        the (CoT, trajectory) pair before the trajectory is executed.
+        """
         session_info = self._require_session_info()
         # Create request with both old and new fields for backward compatibility
         request = DriveRequest(
@@ -260,4 +307,7 @@ class DriverService(ServiceBase[EgodriverServiceStub]):
 
         await session_info.broadcaster.broadcast(LogEntry(driver_return=response))
 
-        return trajectory_from_grpc(response.trajectory)
+        return DriveOutcome(
+            trajectory=trajectory_from_grpc(response.trajectory),
+            reasoning_text=_reasoning_text_from_response(response),
+        )

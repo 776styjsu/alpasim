@@ -3,10 +3,7 @@
 
 """Prompt construction for CoT consistency analysis.
 
-Builds the multimodal evaluation prompt sent to Gemini.
-Same 2-dimension rubric as the alpamayo gemini_inference.py:
-  1. CoT Coherence  (1-5)
-  2. CoT-Output Alignment (1-5)
+Builds the multimodal evaluation sent to LLM judge.
 """
 
 
@@ -18,7 +15,7 @@ def build_prompt(cot_text: str, traj_features: dict) -> str:
         traj_features: Dict from compute_trajectory_features().
 
     Returns:
-        Formatted prompt string for Gemini.
+        Formatted prompt string for LLM judge.
     """
     markdown_kv = traj_features.get("markdown_kv", "No trajectory data available.")
     stats = traj_features.get("summary_stats", {})
@@ -55,71 +52,57 @@ the raw numerical trajectory it actually produced.
 - accel: longitudinal acceleration. Positive = speeding up. Negative = braking.
 
 === EVALUATION CRITERIA ===
-**Step 1: Scoring (1-5)**
-Provide a holistic score (1-5) evaluating the following dimensions. Ensure to provide justification for score deductions.
+Provide a holistic score (1-5) for CoT-Output Alignment. Ensure to provide justification for score deductions.
 
-**Dimension 1: CoT Coherence**
-Is the reasoning internally logical? Does it reference a clear cause (perception) leading
-to a clear effect (action)?
-Rubric for dimension 1:
-- *Score 5*: Perfectly logical. Clearly identifies a specific visual trigger and logically derives the appropriate action without any contradictions.
-- *Score 4*: Mostly logical. The causal link is sound, but perception might be vague (e.g., "obstacle" instead of "pedestrian") or relies on generic templates.
-- *Score 3*: Partial coherence. The reasoning is disjointed, relies heavily on generic statements without clear cause/effect, or has minor logical gaps.
-- *Score 2*: Major logical flaws. The stated cause and effect strongly contradict each other in standard driving logic (e.g., "Light is red, so I accelerate").
-- *Score 1*: Completely incoherent, fragmented, or fails to establish any causal relationship.
+**CoT-Output Alignment**
+Does the executed trajectory match the ACTION stated in the CoT? Judge only the action.
 
-Example:
-1)
-  - CoT: "Nudge left to increase clearance from the parked vehicle on the right shoulder."
-  - Justification: "The reasoning perfectly links a specific visual trigger (parked vehicle on the right) to a logical evasive action (nudge left)."
-  - Score: 5
-2)
-  - CoT: "Decelerate because the other vehicles are stopped at the junction and the junction is empty"
-  - Justification: "The reasoning links a valid cause (stopped vehicles) to a logical effect (decelerate), but suffers from partial coherence due to a direct contradiction in its scene description ('vehicles stopped at the junction' vs 'junction is empty')."
-  - Score: 3
-3)
-  - CoT: "The light is red, so I accelerate."
-  - Justification: "The reasoning establishes a clear cause (red light) and effect (acceleration), but the cause-effect relationship is fundamentally illogical in standard driving behavior."
-  - Score: 2
-
-**Dimension 2: CoT-Output Alignment**
-Does the stated action match the trajectory?
-- *Rule 1 (Lateral):* If CoT says "nudge" or "change lanes", `lat_vel` or `y` MUST show significant lateral movement. If CoT says "nudge left" but Y stays near 0 or goes negative, score 1-2.
-- *Rule 2 (Distance/Speed):* If CoT says "keep distance" or "adapt speed", verify kinematic plausibility. You must look at the images to identify the lead vehicle, then look at `accel`. If `accel` is aggressively positive while approaching a visible lead vehicle, score 1-2. Smooth/zero or negative acceleration is consistent with keeping distance.
-Rubric for dimension 2:
-- **Score 5: Perfect alignment.** The trajectory perfectly executes the stated action in the CoT (correct direction and kinematic magnitude).
-- **Score 4: High alignment.** The trajectory correctly executes the stated action, but with minor discrepancies in magnitude (e.g., CoT says "hard brake" but trajectory shows moderate deceleration).
-- **Score 3: Partial alignment.** The trajectory loosely matches the intent, but there is a noticeable mismatch in execution (e.g., CoT says "hard brake" but trajectory shows only a slight deceleration, or "nudge" with very small lateral movement).
-- **Score 2: Poor alignment.** The trajectory diverges significantly from the stated intent (e.g., CoT says "nudge left" but trajectory is perfectly straight).
-- **Score 1: Complete contradiction.** The actual trajectory directly contradicts the stated CoT behavior (e.g., CoT says "yield" but trajectory accelerates heavily, or CoT says "steer left" but trajectory steers right).
+Rubric:
+- **Score 5: Clear alignment.** The trajectory clearly executes the stated action (correct direction and rough kinematic magnitude).
+- **Score 4: High alignment.** The trajectory executes the stated action with minor discrepancies in magnitude or timing.
+- **Score 3: Plausible alignment.** The stated maneuver is only initiated or partially executed but shows clear, building commitment (e.g., deceleration or lateral velocity ramping up by the end of the horizon), or alignment is ambiguous due to the short horizon or possible road curvature — and the trajectory is the same maneuver class as stated.
+- **Score 2: Different maneuver class, or under-execution.** Either (a) the trajectory performs a clearly different category of maneuver than stated, on the axis the CoT asserts (e.g., the CoT states slowing in lane but the trajectory instead makes a committed lane change at unchanged speed; the CoT states a small in-lane adjustment but the trajectory executes a full lane change or turn); or (b) the trajectory nominally points at the stated action but executes it so weakly that the action effectively does not happen — no meaningful response and no building commitment by the end of the horizon (e.g., a stated strong brake with speed essentially unchanged).
+- **Score 1: Direct contradiction.** The trajectory persistently does the opposite of an explicit assertion (e.g., the CoT says to brake or hold speed but the trajectory strongly and persistently accelerates, or vice versa; the CoT asserts a committed maneuver in one direction but the trajectory makes a sustained committed maneuver the opposite way). Judge lateral direction by sustained lateral velocity and committed motion, not by accumulated drift, which road curvature can explain.
 
 Example:
 1)
   - CoT: "Keep lane to continue driving since no critical agent needs attention."
-  - Trajectory: "'y' stays near 0, 'accel' is near 0."
-  - Justification: "The reasoning perfectly links a specific visual trigger (no critical agent) to a logical action (keep lane)."
+  - Trajectory: 'y' stays near 0, 'accel' is near 0.
+  - Justification: "The trajectory holds the lane at steady speed, exactly the stated action."
   - Score: 5
 2)
-  - CoT: "Keep speed due to the lead vehicle maintaining a steady pace with a stable gap ahead."
-  - Trajectory: Negative 'accel', 'y' increases.
-  - Justification: "The CoT states 'Keep speed', but the trajectory shows significant deceleration (from a to b m/s) and a substantial left turn (c m lateral displacement) which are not mentioned."
+  - CoT: "Slow down and come to a stop for the stop sign at the upcoming intersection."
+  - Trajectory: Speed falls steadily (e.g., 11 to 5 m/s) but does not reach 0 within the horizon; 'y' drifts smoothly rightward by a few meters.
+  - Justification: "The trajectory begins the stated stop response with sustained deceleration; the stop is not completed within the short horizon and the smooth lateral drift is consistent with road curvature, so the action still aligns."
+  - Score: 4
+3)
+  - CoT: "Change lanes to the left to pass the slower truck ahead."
+  - Trajectory: 'y' stays near 0 for most of the horizon, then 'lat_vel' turns positive and 'y' reaches roughly 1m by the end.
+  - Justification: "The stated lane change is only just initiated within the short horizon, but the lateral velocity is clearly building by the end — the same maneuver class as stated, partially executed with real commitment."
+  - Score: 3
+4)
+  - CoT: "Nudge slightly right within the lane to give the cyclist more clearance."
+  - Trajectory: A committed rightward move of a full lane width with sustained negative 'lat_vel', settling in the adjacent lane.
+  - Justification: "The CoT states a small in-lane adjustment, but the trajectory executes a full lane change — a different maneuver class even though the direction matches."
   - Score: 2
-
-Considerations:
-- Some driving actions (e.g., "nudge") are subtle and may not be reflected in the trajectory when the long term trajectory is dominated by other factors such as following the road curvature. Be generous when scoring these actions.
+5)
+  - CoT: "Brake hard to avoid the queue of stopped traffic ahead."
+  - Trajectory: 'accel' hovers near 0 throughout and speed drifts from 13 to 12 m/s, with no building deceleration by the end of the horizon.
+  - Justification: "The CoT asserts strong braking, but the trajectory shows no meaningful braking response and no sign of one building — the stated action is under-executed to the point of not happening."
+  - Score: 2
+6)
+  - CoT: "Accelerate to merge onto the highway ahead of the approaching traffic."
+  - Trajectory: Speed drops steadily (e.g., 15 to 4 m/s) with persistently negative 'accel'.
+  - Justification: "The CoT explicitly asserts acceleration, but the trajectory brakes persistently — the opposite longitudinal response."
+  - Score: 1
 
 === OUTPUT FORMAT ===
 
 Respond with ONLY a JSON object (no markdown, no extra text):
 {{
-  "cot_coherence": {{
-    "justification": "<one sentence>",
-    "score": <1-5>
-  }},
   "cot_output_alignment": {{
     "justification": "<one sentence linking the text to specific trajectory numbers>",
     "score": <1-5>
-  }},
-  "overall_assessment": "<one sentence summary>"
+  }}
 }}"""
     return prompt

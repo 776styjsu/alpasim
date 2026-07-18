@@ -258,6 +258,8 @@ class ContainerSet:
 
     sim: list[ContainerDefinition] = field(default_factory=list)
     runtime: list[ContainerDefinition] = field(default_factory=list)
+    eval: list[ContainerDefinition] = field(default_factory=list)
+    agg: list[ContainerDefinition] = field(default_factory=list)
 
 
 def create_gpu_assigner(gpu_ids: List[int] | None) -> Iterator[int | None]:

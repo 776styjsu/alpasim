@@ -1,6 +1,6 @@
 # @package _global_
 # Config for running on workstations/clusters using Apptainer instead of Docker.
-# Use cmd line arg "+deploy=local_apptainer" with wizard.
+# Use cmd line arg "deploy=local_apptainer" with wizard.
 #
 # Prerequisites:
 #   1. Build an Apptainer image:  ./build_apptainer.sh   (no Docker required)
@@ -8,7 +8,9 @@
 #      OR let Apptainer pull via docker:// URI (requires network access)
 
 defaults:
-  - /stable_manifest/oss
+  # stable_manifest was removed from OSS; keep this optional so internal
+  # environments can still provide it without breaking OSS users.
+  - optional /stable_manifest: oss
   - _self_
 
 defines:
@@ -19,6 +21,8 @@ wizard:
   run_method: "APPTAINER"
   # Directory(s) to search for pre-built Apptainer images (.sif or sandbox dirs).
   # Set to your local cache path, e.g.: ["/path/to/sif-cache"]
+  # Cache filenames must match image stems, e.g. alpasim-base:0.66.0 ->
+  # alpasim_base_0.66.0.sif (or .sandbox).
   # If empty, Apptainer will pull images via docker:// URI.
   sif_caches: []
 

@@ -10,9 +10,31 @@ netrc.secret
 __pycache__/
 .mypy_cache/
 .wizard*/
+.hf-cache/
+.uv-cache/
+.qwen3-vllm-env/
+.qwen35-vllm-env/
+benchmark_llm_matrix/
+.env
+
+# Local experiment outputs (rollouts, benchmarks, plots, logs)
+/tutorial_alpamayo*
+/tutorial_archive/
+/archive/
+/benchmark*
+/nurec_label_coverage_*
+/result.json
+/*_trajectory_plots/
+/logs/
+/*.log
+/sif-cache/
+*.bak
+*.bak_*
+*.tmp
 
 # AI stuff
 .claude
+.codex
 .serena
 .zed
 CLAUDE.md

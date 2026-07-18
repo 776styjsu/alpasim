@@ -22,6 +22,7 @@ from alpasim_runtime.autoresume import mark_rollout_complete
 from alpasim_runtime.broadcaster import MessageBroadcaster
 from alpasim_runtime.camera_catalog import CameraCatalog
 from alpasim_runtime.config import PhysicsUpdateMode
+from alpasim_runtime.consistency_monitor import ConsistencyMonitor
 from alpasim_runtime.delay_buffer import DelayBuffer
 from alpasim_runtime.events.base import (
     EndSimulationException,
@@ -148,6 +149,19 @@ class EventBasedRollout:
             vector_map=self.unbound.vector_map,
             route_generator_type=self.unbound.route_generator_type,
         )
+
+        # Online CoT/trajectory consistency monitor (None when disabled). The
+        # scene map is static, so lane-center geometry is cached once here.
+        self.consistency_monitor = ConsistencyMonitor.from_config(
+            self.unbound.consistency_monitor
+        )
+        if self.consistency_monitor is not None:
+            self.consistency_monitor.prepare_for_scene(
+                self.unbound.vector_map,
+                audit_path=os.path.join(
+                    self._rollout_dir(), "consistency_monitor.jsonl"
+                ),
+            )
 
         self._runtime_evaluator = RuntimeEvaluator(
             eval_config=self.eval_config,
@@ -325,6 +339,7 @@ class EventBasedRollout:
                 camera_ids=camera_ids,
                 route_generator=self.route_generator,
                 send_recording_ground_truth=unbound.send_recording_ground_truth,
+                consistency_monitor=self.consistency_monitor,
             )
         )
         queue.submit(

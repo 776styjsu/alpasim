@@ -12,6 +12,10 @@ fi
 # Get the repository root directory (based on script location)
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Keep uv's package cache out of quota-limited home directories on shared systems.
+export UV_CACHE_DIR="${UV_CACHE_DIR:-${REPO_ROOT}/.uv-cache}"
+export HF_HOME="${HF_HOME:-${REPO_ROOT}/.hf-cache}"
+mkdir -p "${UV_CACHE_DIR}" "${HF_HOME}"
 
 # Check for Rust toolchain (required for utils_rs maturin build)
 if ! command -v cargo &> /dev/null; then
@@ -52,23 +56,18 @@ fi
 popd > /dev/null
 
 # Ensure Hugging Face token is available (needed to download files)
-if [[ -z "${HF_TOKEN}" ]]; then
+if [[ -z "${HF_TOKEN:-}" ]]; then
     echo "⚠️   Hugging Face token (HF_TOKEN) not found in environment."
     echo "If you need to download files from Hugging Face, please set HF_TOKEN."
 fi
 
-# Ensure that the hugging face cache is available
-if [[ -z "${HF_HOME}" ]]; then
-    echo "Note: Hugging Face cache directory (HF_HOME) not found in environment."
-    FALLBACK_HF_HOME="$HOME/.cache/huggingface"
-    echo "Falling back to default cache directory at $FALLBACK_HF_HOME"
-    if [[ ! -d "$FALLBACK_HF_HOME" ]]; then
-        echo "Creating Hugging Face cache directory at $FALLBACK_HF_HOME"
-        mkdir -p "$FALLBACK_HF_HOME"
-        if [[ $? -ne 0 ]]; then
-            echo "❌ Failed to create Hugging Face cache directory at $FALLBACK_HF_HOME"
-            return 1
-        fi
+# Ensure that the Hugging Face cache is available outside quota-limited home dirs.
+if [[ ! -d "${HF_HOME}" ]]; then
+    echo "Creating Hugging Face cache directory at ${HF_HOME}"
+    mkdir -p "${HF_HOME}"
+    if [[ $? -ne 0 ]]; then
+        echo "❌ Failed to create Hugging Face cache directory at ${HF_HOME}"
+        return 1
     fi
 fi
 

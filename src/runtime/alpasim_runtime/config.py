@@ -160,6 +160,32 @@ class RouteGeneratorType(Enum):
 
 
 @dataclass
+class ConsistencyMonitorConfig:
+    """Online CoT/trajectory consistency monitor (F-LLM map_graph approach).
+
+    When ``enabled``, the policy event judges each step's chain-of-thought
+    against the trajectory before executing it, re-sampling the driver up to
+    ``max_samples`` times and executing the first sample scoring at least
+    ``accept_threshold`` (else the highest-scored sample). Disabled by default,
+    so runtime behaviour is unchanged unless explicitly turned on.
+    """
+
+    enabled: bool = False
+    # Judge backend: one of alpasim_utils.cot_consistency.PROVIDERS
+    # (qwen3_4b_fp8 / qwen35_4b_fp8 / openai / uva).
+    provider: str = "qwen3_4b_fp8"
+    model: str | None = None  # override the provider's default model
+    base_url: str | None = None  # override the provider's default endpoint
+    prompt: str = "center_of_lane_v5"  # only center_of_lane_v5 is wired online
+    lane_reference: str = "map_graph"
+    trajectory_frame: str = "dual"
+    max_samples: int = 3
+    accept_threshold: float = 3.0
+    monitor_every_n_steps: int = 1  # judge only every Nth control step
+    seed: int = 42
+
+
+@dataclass
 class SimulationConfig:
     """
     Shared simulation parameters — applies to all scenes.
@@ -208,6 +234,11 @@ class SimulationConfig:
 
     # Flag to enable grouping of render requests
     group_render_requests: bool = False
+
+    # Online CoT/trajectory consistency monitor (disabled by default).
+    consistency_monitor: ConsistencyMonitorConfig = field(
+        default_factory=ConsistencyMonitorConfig
+    )
 
 
 @dataclass

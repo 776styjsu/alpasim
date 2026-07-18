@@ -127,7 +127,11 @@ async def convert_single_log(
             
         scene_id = rollout_metadata.session_metadata.scene_id if rollout_metadata and rollout_metadata.session_metadata else "unknown"
         vec_map = artifacts[scene_id].map if scene_id in artifacts else None
-        scenario_input = acc.build_scenario_eval_input("extract", "extract", "0", vec_map)
+        scenario_input = acc.build_scenario_eval_input(
+            run_uuid="extract",
+            run_name="extract",
+            vec_map=vec_map,
+        )
         sim_result = SimulationResult.from_scenario_input(scenario_input, eval_cfg)
         
         all_timestamps = set()

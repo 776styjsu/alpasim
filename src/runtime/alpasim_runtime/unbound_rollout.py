@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 from alpasim_grpc.v0.logging_pb2 import RolloutMetadata
 from alpasim_runtime.config import (
+    ConsistencyMonitorConfig,
     PhysicsUpdateMode,
     RouteGeneratorType,
     RuntimeCameraConfig,
@@ -95,6 +96,7 @@ class UnboundRollout:
 
     vector_map: VectorMap | None = None
     follow_log: str | None = None
+    consistency_monitor: ConsistencyMonitorConfig | None = None
 
     # Actors filtered out from simulation but still present in USDZ; we keep
     # a lowered-to-ground trajectory so we can override their rendering.
@@ -238,6 +240,7 @@ class UnboundRollout:
             vector_map=artifact.map,
             hidden_traffic_objs=hidden_traffic_objs,
             group_render_requests=simulation_config.group_render_requests,
+            consistency_monitor=simulation_config.consistency_monitor,
         )
 
     def get_log_metadata(self) -> RolloutMetadata.SessionMetadata:

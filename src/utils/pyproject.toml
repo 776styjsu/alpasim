@@ -30,6 +30,7 @@ geometry = [
 [project.scripts]
 asl-to-frames = "alpasim_utils.asl_to_frames.__main__:main"
 print-asl = "alpasim_utils.print_asl.__main__:main"
+trajectory-additional-info = "alpasim_utils.trajectory_additional_info:main"
 
 [[project.authors]]
 name = "Michal Tyszkiewicz"
