@@ -10,6 +10,7 @@ from typing import Any
 
 import torch
 from alpamayo1_5 import helper
+from alpamayo1_5.config import Alpamayo1_5Config
 from alpamayo1_5.models.alpamayo1_5 import Alpamayo1_5
 
 from ..schema import ModelConfig
@@ -73,10 +74,17 @@ class Alpamayo15Model(AlpamayoBaseModel):
         logger.info("Loading Alpamayo 1.5 checkpoint from %s", checkpoint_path)
         logger.info("Using Alpamayo 1.5 attn_implementation=%s", _ATTN_IMPLEMENTATION)
 
+        # The VLM backbone takes its attention implementation from the Alpamayo
+        # config. The `attn_implementation` argument of `from_pretrained` is a
+        # different knob: transformers checks it against `Alpamayo1_5`, which
+        # declares no SDPA support, and it never reaches the backbone.
+        config = Alpamayo1_5Config.from_pretrained(checkpoint_path)
+        config.attn_implementation = _ATTN_IMPLEMENTATION
+
         model = Alpamayo1_5.from_pretrained(
             checkpoint_path,
+            config=config,
             dtype=self.DTYPE,
-            attn_implementation=_ATTN_IMPLEMENTATION,
         ).to(device)
         processor = helper.get_processor(model.tokenizer)
 
