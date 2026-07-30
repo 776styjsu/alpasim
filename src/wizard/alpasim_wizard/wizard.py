@@ -14,7 +14,7 @@ import git
 
 from .configuration import ConfigurationManager
 from .context import WizardContext
-from .deployment import DockerComposeDeployment, SlurmDeployment
+from .deployment import ApptainerDeployment, DockerComposeDeployment, SlurmDeployment
 from .schema import AlpasimConfig, RunMethod
 
 logger = logging.getLogger("alpasim_wizard")
@@ -74,14 +74,22 @@ class AlpasimWizard:
         docker_compose_deployment = DockerComposeDeployment(self.context)
         docker_compose_deployment.generate_docker_compose()
         slurm_deployment = SlurmDeployment(self.context)
+        apptainer_deployment = (
+            ApptainerDeployment(self.context)
+            if self.context.cfg.wizard.run_method == RunMethod.APPTAINER
+            else None
+        )
         # Use docker compose container set for DOCKER_COMPOSE and NONE
         # (NONE generates docker-compose files that will be run manually)
-        container_set = (
-            docker_compose_deployment.container_set
-            if self.context.cfg.wizard.run_method
-            in (RunMethod.DOCKER_COMPOSE, RunMethod.NONE)
-            else slurm_deployment.container_set
-        )
+        if apptainer_deployment is not None:
+            container_set = apptainer_deployment.container_set
+        elif self.context.cfg.wizard.run_method in (
+            RunMethod.DOCKER_COMPOSE,
+            RunMethod.NONE,
+        ):
+            container_set = docker_compose_deployment.container_set
+        else:
+            container_set = slurm_deployment.container_set
 
         # With the container set, we can now generate the configs and save them.
         config_manager = ConfigurationManager(self.context.cfg.wizard.log_dir)
@@ -99,6 +107,9 @@ class AlpasimWizard:
                 slurm_deployment.deploy_all_services()
             elif self.context.cfg.wizard.run_method == RunMethod.DOCKER_COMPOSE:
                 docker_compose_deployment.deploy_all_services()
+            elif self.context.cfg.wizard.run_method == RunMethod.APPTAINER:
+                assert apptainer_deployment is not None
+                apptainer_deployment.deploy_all_services()
             elif self.context.cfg.wizard.run_method == RunMethod.NONE:
                 logger.info(
                     "Config generated but not executed. "

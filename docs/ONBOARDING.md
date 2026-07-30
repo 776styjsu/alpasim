@@ -27,6 +27,8 @@ Alpasim depends on access to the following:
   - The wizard needs `docker`, `docker-compose-plugin`, and `docker-buildx-plugin`
   - Docker needs to be able to run without `sudo`. If you see a permission error when running
     `docker` commands, add yourself to the docker group: `sudo usermod -aG docker $USER`
+  - No Docker on your machine or cluster? Apptainer can replace it; see the
+    [Apptainer guide](APPTAINER.md).
 - CUDA 12.8 or greater installed (see [here](https://developer.nvidia.com/cuda-downloads) for
   instructions)
   - The NRE container uses CUDA 12.8, so your host NVIDIA driver must support it (driver version >=

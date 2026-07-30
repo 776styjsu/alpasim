@@ -70,6 +70,7 @@ class ScenesConfig:
 class RunMethod(Enum):
     SLURM = "slurm"
     DOCKER_COMPOSE = "docker_compose"
+    APPTAINER = "apptainer"
     NONE = "none"
 
 
@@ -93,6 +94,69 @@ class WizardPrometheusConfig:
     file_sd_dir: str | None = None
     start_prometheus: bool = True
     run_uuid: str | None = None
+
+
+@dataclass
+class WizardApptainerConfig:
+    """Settings for the Apptainer deployment (`run_method: APPTAINER`).
+
+    Apptainer runs containers unprivileged as the calling user, which makes it
+    the usual choice on HPC clusters where Docker is unavailable. Defaults here
+    are deliberately site-neutral: everything that depends on a particular
+    cluster (module names, image caches, overlay policy) is opt-in.
+    """
+
+    # Directories searched for pre-built images, in order. Entries may be `.sif`
+    # files or sandbox directories named after the image (see
+    # `image_to_apptainer_basename`), e.g. `alpasim-base:0.1.0` ->
+    # `alpasim_base_0.1.0.sif`. Populated by `./build_apptainer.sh`.
+    image_caches: list[str] = field(default_factory=list)
+
+    # When no cached image matches, run `docker://<image>` so Apptainer pulls and
+    # converts it on the fly. Set to false on clusters without outbound network
+    # access, so a missing image fails immediately with the paths searched.
+    registry_fallback: bool = True
+
+    # Apptainer executable. Set an absolute path when it is not on PATH; on
+    # clusters using environment modules, `module load apptainer` in the job
+    # script before starting the wizard works too.
+    binary: str = "apptainer"
+
+    # Extra arguments added to every `apptainer exec`, e.g. ["--containall"].
+    extra_exec_args: list[str] = field(default_factory=list)
+
+    # Environment variables set in every container. `VAR=value` sets a value;
+    # a bare `VAR` passes the host value through. The defaults keep `uv` on the
+    # image's virtualenv instead of a `.venv` in the bind-mounted repo, and stop
+    # Python from writing `__pycache__` onto shared filesystems.
+    environments: list[str] = field(
+        default_factory=lambda: [
+            "UV_PROJECT_ENVIRONMENT=/repo/.venv",
+            "PYTHONDONTWRITEBYTECODE=1",
+        ]
+    )
+
+    # Working directory for services built from an alpasim image that do not set
+    # `workdir` themselves. Apptainer ignores the image's WORKDIR, so it has to
+    # be passed explicitly. Services with `external_image` run from `/` instead,
+    # unless their own service config sets `workdir`.
+    workdir: str = "/repo"
+
+    # Give containers a writable in-memory layer so processes can write outside
+    # bind mounts. Disable on systems where Apptainer cannot set up overlays.
+    writable_tmpfs: bool = True
+
+    # Resolved images (cache path or docker:// reference) matching any of these
+    # substrings get a file-backed ext3 overlay
+    # instead of `--writable-tmpfs`. Needed for images whose entrypoint creates
+    # a large writable tree (e.g. a runfiles virtualenv with thousands of
+    # symlinks), which overflows the small kernel tmpfs, and for which a
+    # directory overlay is not an option because overlayfs upper layers need
+    # xattr support that shared filesystems such as GPFS lack.
+    overlay_image_patterns: list[str] = field(default_factory=list)
+
+    # Size in MiB of each overlay created for `overlay_image_patterns` matches.
+    overlay_size_mb: int = 4096
 
 
 @dataclass
@@ -129,6 +193,9 @@ class WizardConfig:
     vscode: str = MISSING
 
     sqshcaches: list[str] = MISSING
+
+    # Settings for run_method: APPTAINER. Ignored by the other run methods.
+    apptainer: WizardApptainerConfig = field(default_factory=WizardApptainerConfig)
 
     slurm_job_id: int | None = MISSING
     timeout: int = MISSING

@@ -2,6 +2,17 @@
 This document lists major updates which change UX and require adaptation.
 It should be sorted by date (more recent on top) and link to MRs which introduce the changes.
 
+## Apptainer deployment (30.07.26)
+
+`wizard.run_method=APPTAINER` runs the simulation with
+[Apptainer](https://apptainer.org) instead of Docker, for hosts and HPC clusters
+without a Docker daemon. Start from `deploy=local_apptainer` and build or convert
+an image with `./build_apptainer.sh`; settings live under `wizard.apptainer.*`.
+Each run also writes a standalone `<log_dir>/run.sh` reproducing the deployment.
+See [docs/APPTAINER.md](docs/APPTAINER.md).
+
+**Migration**: None. Existing run methods are unaffected.
+
 ## July 2026 public sync updates (12.07.26)
 
 This sync expands the public scene catalog, improves rollout reliability and

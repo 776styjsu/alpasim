@@ -66,6 +66,8 @@ To run simulations locally (Docker Compose, single machine), see the [Tutorial](
 The default tutorial path uses NuRec; for OmniDreams as the renderer backend, see the
 [Video Model Renderer guide](docs/VIDEO_MODEL.md).
 For cluster or SLURM deployment, see `src/tools/run-on-slurm`.
+Where Docker is not available (many HPC clusters), see the
+[Apptainer guide](docs/APPTAINER.md).
 
 ## Documentation & Resources
 
@@ -74,6 +76,7 @@ For cluster or SLURM deployment, see `src/tools/run-on-slurm`.
 - **[Manual Driver](docs/MANUAL_DRIVER.md)**: Interactive keyboard control of the ego vehicle
 - **[Video Model Renderer](docs/VIDEO_MODEL.md)**: Running OmniDreams through FlashDreams as the
   AlpaSim renderer backend
+- **[Apptainer Guide](docs/APPTAINER.md)**: Running without Docker, e.g. on HPC clusters
 - **[Operations Guide](docs/OPERATIONS.md)**: Performance tuning, configuration, and troubleshooting
 - **[Telemetry Guide](docs/TELEMETRY.md)**: Prometheus metrics, persistence, and central discovery
 - **[Data Pipeline](docs/DATA_PIPELINE.md)**: ASL log format and reading logs

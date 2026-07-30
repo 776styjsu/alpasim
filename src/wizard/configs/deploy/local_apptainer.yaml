@@ -1,0 +1,21 @@
+# @package _global_
+# Deploy target: local workstation or HPC node using Apptainer instead of Docker.
+# Use with a topology config, e.g.:
+#   ./build_apptainer.sh
+#   uv run alpasim_wizard deploy=local_apptainer topology=1gpu driver=vavam \
+#     wizard.log_dir=./out
+#
+# `build_apptainer.sh` writes into `sif-cache/` by default, which is where this
+# profile looks for images. See docs/APPTAINER.md.
+
+defaults:
+  - _self_
+
+defines:
+  filesystem: ${repo-relative:"data"}
+
+wizard:
+  run_method: "APPTAINER"
+  apptainer:
+    image_caches:
+      - ${repo-relative:"sif-cache"}
