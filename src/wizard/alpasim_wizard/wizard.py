@@ -15,7 +15,12 @@ import git
 
 from .configuration import ConfigurationManager
 from .context import WizardContext
-from .deployment import ApptainerDeployment, DockerComposeDeployment, SlurmDeployment, SlurmEnrootDeployment
+from .deployment import (
+    ApptainerDeployment,
+    DockerComposeDeployment,
+    SlurmDeployment,
+    SlurmEnrootDeployment,
+)
 from .schema import AlpasimConfig, RunMethod
 
 logger = logging.getLogger("alpasim_wizard")

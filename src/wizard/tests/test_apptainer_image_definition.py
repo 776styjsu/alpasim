@@ -183,3 +183,65 @@ def test_default_build_output_is_where_the_deploy_profile_looks() -> None:
     )
     # ... and writes it into the directory the profile searches.
     assert cache == REPO_ROOT / "sif-cache"
+
+
+def test_source_build_includes_docker_workspace_extras() -> None:
+    docker_extras = set(re.findall(r"--extra (\w+)", DOCKERFILE.read_text()))
+    native_extras = set(re.findall(r"--extra (\w+)", APPTAINER_DEF.read_text()))
+    assert native_extras == docker_extras
+
+
+def test_build_requires_explicit_source() -> None:
+    result = subprocess.run(["bash", str(BUILD_SCRIPT)], capture_output=True, text=True)
+    assert result.returncode == 2
+    assert "--from-registry" in result.stderr
+
+
+@pytest.mark.parametrize("source", ["registry", "archive"])
+def test_conversion_respects_relative_output_and_scratch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    import json
+    import sys
+
+    binary = tmp_path / "fake-apptainer"
+    record = tmp_path / "build.json"
+    binary.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, pathlib, sys\n"
+        f"pathlib.Path({str(record)!r}).write_text(json.dumps({{\n"
+        "    'args': sys.argv[1:], 'tmpdir': os.environ['APPTAINER_TMPDIR']\n"
+        "}))\n"
+        "pathlib.Path(sys.argv[-2]).write_text('converted')\n"
+    )
+    binary.chmod(0o755)
+    monkeypatch.setenv("APPTAINER_BIN", str(binary))
+    monkeypatch.setenv("APPTAINER_TMPDIR", "scratch")
+    archive = tmp_path / "image.tar"
+    archive.touch()
+    reference = "registry.example/team/image:1"
+    source_args = (
+        ["--from-registry", reference]
+        if source == "registry"
+        else ["--from-archive", archive.name, "--tag", reference]
+    )
+    subprocess.run(
+        ["bash", str(BUILD_SCRIPT), *source_args, "--output-dir", "images"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(record.read_text())
+    assert result["tmpdir"] == str(tmp_path / "scratch")
+    assert "--fakeroot" not in result["args"]
+    expected_source = (
+        f"docker://{reference}" if source == "registry" else f"docker-archive:{archive}"
+    )
+    assert result["args"][-1] == expected_source
+    assert (
+        tmp_path / "images" / image_to_apptainer_basename(reference)
+    ).read_text() == "converted"
+    assert not list((tmp_path / "scratch").glob("alpasim-build-*"))

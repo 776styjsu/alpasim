@@ -111,10 +111,8 @@ class WizardApptainerConfig:
     cluster (module names, image caches, overlay policy) is opt-in.
     """
 
-    # Directories searched for pre-built images, in order. Entries may be `.sif`
-    # files or sandbox directories named after the image (see
-    # `image_to_apptainer_basename`), e.g. `alpasim-base:0.1.0` ->
-    # `alpasim_base_0.1.0.sif`. Populated by `./build_apptainer.sh`.
+    # Optional caches populated by build_apptainer.sh. Filenames include a
+    # digest of the full image reference to avoid registry/name collisions.
     image_caches: list[str] = field(default_factory=list)
 
     # When no cached image matches, run `docker://<image>` so Apptainer pulls and
@@ -127,18 +125,15 @@ class WizardApptainerConfig:
     # script before starting the wizard works too.
     binary: str = "apptainer"
 
+    # Keep module/host variables out; service environments are passed explicitly.
+    cleanenv: bool = True
+
     # Extra arguments added to every `apptainer exec`, e.g. ["--containall"].
     extra_exec_args: list[str] = field(default_factory=list)
 
-    # Environment variables set in every container. `VAR=value` sets a value;
-    # a bare `VAR` passes the host value through. The defaults keep `uv` on the
-    # image's virtualenv instead of a `.venv` in the bind-mounted repo, and stop
-    # Python from writing `__pycache__` onto shared filesystems.
+    # Explicit additions to the image environment. Bare names pass host values.
     environments: list[str] = field(
-        default_factory=lambda: [
-            "UV_PROJECT_ENVIRONMENT=/repo/.venv",
-            "PYTHONDONTWRITEBYTECODE=1",
-        ]
+        default_factory=lambda: ["PYTHONDONTWRITEBYTECODE=1"]
     )
 
     # Working directory for services built from an alpasim image that do not set
@@ -150,18 +145,6 @@ class WizardApptainerConfig:
     # Give containers a writable in-memory layer so processes can write outside
     # bind mounts. Disable on systems where Apptainer cannot set up overlays.
     writable_tmpfs: bool = True
-
-    # Resolved images (cache path or docker:// reference) matching any of these
-    # substrings get a file-backed ext3 overlay
-    # instead of `--writable-tmpfs`. Needed for images whose entrypoint creates
-    # a large writable tree (e.g. a runfiles virtualenv with thousands of
-    # symlinks), which overflows the small kernel tmpfs, and for which a
-    # directory overlay is not an option because overlayfs upper layers need
-    # xattr support that shared filesystems such as GPFS lack.
-    overlay_image_patterns: list[str] = field(default_factory=list)
-
-    # Size in MiB of each overlay created for `overlay_image_patterns` matches.
-    overlay_size_mb: int = 4096
 
 
 @dataclass
@@ -255,6 +238,8 @@ class ContainerConfig:
     environments: list[str] = field(default_factory=list)
     workdir: str | None = None
     remap_root: bool = False
+    # Optional per-container ext3 scratch for Apptainer, in MiB.
+    apptainer_overlay_size_mb: int | None = None
 
 
 @dataclass

@@ -1,142 +1,147 @@
 # Running AlpaSim with Apptainer
 
-[Apptainer](https://apptainer.org) (formerly Singularity) runs containers unprivileged, as the
-calling user. Use this deployment when Docker is unavailable — typically on HPC clusters, shared
-workstations, or anywhere you cannot join the `docker` group.
+[Apptainer](https://apptainer.org) runs containers as the calling user without a Docker daemon.
+The `deploy=local_apptainer` profile runs the usual AlpaSim services on one host, including inside
+an existing Slurm allocation. Module names, storage paths, and scheduler options belong in your
+site's job script or deployment config.
 
-Everything else works as usual: the wizard composes the same services from the same configs, and
-`deploy=local_apptainer` swaps only the container runtime.
+## Prepare images, then run
+
+The recommended workflow uses published Docker/OCI images. Apptainer downloads and converts
+these itself; Docker is not required on the machine doing the conversion or running the simulation.
+Prepare images before submitting a job so startup does not depend on registry access.
 
 ```bash
-./build_apptainer.sh                                    # build the image into ./sif-cache
+# Replace the registry and version with the image you have access to.
+apptainer pull alpasim.sif docker://<registry>/alpasim-base:<version>
+# Use the renderer version selected by your service configuration.
+apptainer pull renderer.sif docker://nvcr.io/nvidia/nre/nre-ga:26.04
+
 uv run alpasim_wizard deploy=local_apptainer topology=1gpu driver=vavam \
+  defines.base_image=$PWD/alpasim.sif \
+  services.renderer.image=$PWD/renderer.sif \
   wizard.log_dir=$PWD/out
 ```
 
-## Getting an image
+`defines.base_image` selects the shared AlpaSim image. Any `services.<name>.image` can instead be
+an absolute or relative SIF path, a sandbox directory, or an explicit Apptainer URI such as
+`docker://...`, `oras://...`, or `library://...`. Relative paths resolve when the wizard prepares
+the run. A missing local path fails immediately.
 
-The wizard looks for images in `wizard.apptainer.image_caches` under a name derived from the image
-reference: `:` and `-` become `_`, and the extension is `.sif` (or `.sandbox`). So
-`alpasim-base:0.111.0` is looked up as `alpasim_base_0.111.0.sif`. `build_apptainer.sh` writes
-exactly that name into `./sif-cache`, which is what `deploy=local_apptainer` searches, so the
-default flow needs no configuration. Print the expected name with
-`./build_apptainer.sh --print-image-name`.
+For registry authentication, use `apptainer registry login`, or set
+`APPTAINER_DOCKER_USERNAME` and `APPTAINER_DOCKER_PASSWORD` before pulling.
+See [Apptainer's OCI guide](https://apptainer.org/docs/user/latest/docker_and_oci.html).
 
-There are three ways to get an image, in decreasing order of what the cluster must allow:
+## Optional image cache and source builds
+
+The build helper can prepare images in `sif-cache/`, which the deployment profile searches:
 
 ```bash
-# 1. Build from Apptainer.def. Needs root or a working --fakeroot setup.
-./build_apptainer.sh
-
-# 2. Convert an image from a registry. Needs no fakeroot, only network access.
 ./build_apptainer.sh --from-registry docker://<registry>/alpasim-base:<version>
-
-# 3. Convert a `docker save` tarball, for air-gapped clusters. Build the Docker
-#    image on a machine that has Docker, then copy the tarball over. Add
-#    --tag <image> if it is not alpasim-base at this repo's version.
-docker save alpasim-base:<version> -o alpasim.tar
-./build_apptainer.sh --from-archive alpasim.tar
+./build_apptainer.sh --from-archive alpasim.tar --tag <registry>/alpasim-base:<version>
 ```
 
-If SIF creation itself fails (it needs `mksquashfs` and enough scratch space), build a sandbox
-directory instead — the wizard runs those too:
+Use the same complete image reference in the service configuration as in the build command.
+Cache filenames contain a readable basename and a hash of the full reference, so registries,
+repositories, and tags cannot accidentally share a cache entry. Inspect the filename with:
 
 ```bash
-./build_apptainer.sh --format sandbox
+./build_apptainer.sh --print-image-name --tag <registry>/alpasim-base:<version>
 ```
 
-`Apptainer.def` mirrors the `Dockerfile`, and a test keeps the base image and package list in sync.
-Two Docker features have no def-file equivalent and are intentionally absent: multi-arch selection
-(the def builds x86_64; on aarch64 convert a Docker image instead) and the `dcgm-exporter` binary
-copied from an NVIDIA image, without which telemetry simply reports no GPU metrics.
+Existing images with older cache names remain usable by setting their paths directly in
+`defines.base_image` or `services.<name>.image`. Automatic cache lookup uses only the new names.
 
-Private dependencies are read from `~/.netrc`, bind-mounted read-only during the build and deleted
-before the image is finalized, so credentials are never stored in the image. Override the path with
-`--netrc`.
+If you need to build from source entirely without Docker, the optional native recipe is available:
+
+```bash
+./build_apptainer.sh --from-def
+# To build a directory instead of a SIF:
+./build_apptainer.sh --from-def --format sandbox
+```
+
+Definition builds require root or working fakeroot support. `Apptainer.def` builds x86_64 and
+installs the same core and recipes dependencies as the Dockerfile. It omits the Docker image's
+DCGM exporter; convert a Docker image if you need that exporter or an aarch64 image.
+The helper stages the source tree, binds `~/.netrc` read-only for private dependencies, and removes
+the copied credentials before finalizing the image. Use `--netrc` to select another credential file.
+
+The helper respects `APPTAINER_TMPDIR` and `APPTAINER_CACHEDIR`; `--tmpdir` overrides the former.
+Otherwise scratch and cache live under the output directory. Choose storage with enough space
+for the unpacked image and build artifacts. `--output`, `--output-dir`, and `--format sandbox`
+work for conversions as well as native builds. Run `./build_apptainer.sh --help` for details.
 
 ## Configuration
 
-All settings live under `wizard.apptainer`; the defaults are site-neutral, so anything specific to
-a cluster is opt-in.
+General runtime settings live under `wizard.apptainer`:
 
 | Key | Default | Purpose |
 | --- | --- | --- |
-| `image_caches` | `[]` (`sif-cache` in the deploy profile) | Directories searched for `.sif` files or sandbox directories. |
-| `registry_fallback` | `true` | Run `docker://<image>` when no cached image matches. Set `false` on air-gapped clusters to fail fast with the paths searched. |
-| `binary` | `apptainer` | Absolute path to the binary when it is not on `PATH`. |
-| `extra_exec_args` | `[]` | Extra flags for every `apptainer exec`, e.g. `[--containall]`. |
-| `environments` | `UV_PROJECT_ENVIRONMENT`, `PYTHONDONTWRITEBYTECODE` | Environment for every container. `VAR=value` sets a value; a bare `VAR` passes the host's value through. |
-| `workdir` | `/repo` | Working directory for services running an alpasim image that do not set `workdir` themselves. Services with `external_image` run from `/` unless they set one. |
-| `writable_tmpfs` | `true` | Writable in-memory layer. Disable where Apptainer cannot set up overlays. |
-| `overlay_image_patterns` | `[]` | Images matching these substrings get a file-backed ext3 overlay instead of tmpfs. |
-| `overlay_size_mb` | `4096` | Size of each of those overlays. |
+| `binary` | `apptainer` | Executable name or absolute path. |
+| `image_caches` | `[]`; `sif-cache/` in the profile | Optional directories containing images prepared by the helper. |
+| `registry_fallback` | `true` | Allow implicit pulls for bare OCI references absent from the cache. Explicit URIs remain explicit pull requests. |
+| `cleanenv` | `true` | Exclude inherited host/module variables; preserve image variables and explicit overrides. |
+| `environments` | `[PYTHONDONTWRITEBYTECODE=1]` | Additional variables for every service; `VAR=value` sets a value and bare `VAR` passes the host value. |
+| `extra_exec_args` | `[]` | Additional Apptainer arguments, with each argument a separate list element. |
+| `workdir` | `/repo` | Default for AlpaSim images; external images use `/`. A service's own `workdir` takes precedence. |
+| `writable_tmpfs` | `true` | Temporary writable layer for paths outside bind mounts. Disable where overlays are unavailable. |
 
-On clusters using environment modules, `module load apptainer` in your job script before starting
-the wizard is enough. Do not rely on the wizard loading it for you: `module` is a shell function
-that often does not exist in the non-interactive shell services are dispatched through. Set
-`binary` to an absolute path if that is a problem.
+Image `ENV` values are preserved. `services.<name>.environments` overrides global additions.
+The launcher uses `--no-eval` so environment values are not evaluated as shell expressions inside
+the container. With `cleanenv`, explicitly list any host variables a service needs, such as
+`HF_TOKEN`. AlpaSim image recipes set `UV_PROJECT_ENVIRONMENT=/repo/.venv` and install managed
+Python under `/opt/python`, accessible to the unprivileged caller.
+
+For a service that needs more writable space than tmpfs permits, set a size in MiB:
+
+```bash
+uv run alpasim_wizard deploy=local_apptainer topology=1gpu driver=vavam \
+  services.renderer.apptainer_overlay_size_mb=4096 wizard.log_dir=$PWD/out
+```
+
+This creates one ext3 overlay per container under `<log_dir>/apptainer-overlays/`, reused when
+rerunning that deployment. It takes precedence over `writable_tmpfs`. The setting defaults to
+`null`; there is no image-name matching. To migrate `overlay_image_patterns` / `overlay_size_mb`,
+set `services.<name>.apptainer_overlay_size_mb` for each service that requires an overlay.
 
 ## On Slurm
 
-Apptainer needs no special Slurm integration — it runs inside your allocation as an ordinary
-process. Load the module (or set `wizard.apptainer.binary`) and run the wizard on the allocated
-node:
+Load the site's module and start the wizard on an allocated compute node:
 
 ```bash
 #!/bin/bash
 #SBATCH --gpus=1 --nodes=1 --time=02:00:00
 module load apptainer
 uv run alpasim_wizard deploy=local_apptainer topology=1gpu driver=vavam \
+  defines.base_image=$PWD/alpasim.sif \
+  services.renderer.image=$PWD/renderer.sif \
   wizard.log_dir=$PWD/out-$SLURM_JOB_ID
 ```
 
-Use `run_method: SLURM` instead when your cluster provides enroot/pyxis and you want the wizard to
-launch each service as its own job step; see the `sqshcaches` settings.
+Add the account, partition, CPU, and memory requests required by your site. The backend does not
+submit jobs or distribute services across nodes. It needs Bash 4.4 or newer and `setsid` on `PATH`.
+The wizard does not load environment modules; alternatively set `wizard.apptainer.binary`.
 
-Every run also writes `<log_dir>/run.sh`, a standalone script that starts the services, waits for
-their ports, runs the runtime, and cleans up on exit. It is useful for submitting a prepared run
-(`wizard.dry_run=true` generates it without executing anything) or for reproducing one by hand.
+Topology GPU indices select entries from the execution environment's `CUDA_VISIBLE_DEVICES`.
+For example, index `0` selects device `3` when the allocation exposes `3,5`; GPU UUIDs also work.
+Without that variable, indices are used directly. Selection happens when `run.sh` executes, so
+a script prepared on a login node uses the compute node's allocation. Out-of-range indices fail.
 
-## Differences from the Docker backends
+## Lifecycle and logs
 
-* **Nothing runs as root.** Files written to bind mounts are owned by you, so the umask workaround
-  the Docker Compose backend needs does not apply here.
-* **The image's `WORKDIR`, `USER` and `ENV` are ignored** by Apptainer. The wizard passes `--pwd`
-  and `--env` explicitly, which is why `workdir` and `environments` exist above. Where Docker falls
-  back to the image's `WORKDIR`, Apptainer needs a directory that exists in the image, so a service
-  running a third-party image needs its own `workdir` if it cares about the working directory.
-* **Services are children of the wizard.** They are started in the background and terminated when
-  the runtime exits; there is no daemon that keeps them alive afterwards.
-* **Per-service logs** are written to `<log_dir>/txt-logs/out-<service>-log.txt`.
-* **Telemetry never blocks the run.** The Prometheus sidecar starts alongside the services, but the
-  simulation does not wait for it.
+The wizard writes `<log_dir>/run.sh` and executes that same script. `wizard.dry_run=true` writes
+it without starting services or creating overlays. The script can also run directly, or be
+submitted with `sbatch` and your site's resource options.
 
-## Troubleshooting
+Services start in separate process groups. Readiness checks fail on startup exit or timeout.
+The runtime's exit status determines success. Without a runtime, the script keeps serving until
+a simulation service exits or the run is interrupted. Telemetry starts alongside the services,
+but its readiness and exit status do not gate the simulation.
 
-**`Could not find apptainer (or singularity) on PATH`** — `module load apptainer`, or set
-`APPTAINER_BIN` for the build script and `wizard.apptainer.binary` for the wizard.
+Normal completion, SIGINT, and SIGTERM trigger cleanup of all launched groups, including the
+runtime. After a ten-second grace period, remaining processes receive SIGKILL. Per-service output
+is appended to `<log_dir>/txt-logs/out-<service>-log.txt` for both wizard and standalone runs.
 
-**The def-file build fails with a fakeroot or user-namespace error** — the cluster does not allow
-unprivileged def builds. Convert a pre-built image instead (`--from-registry`, `--from-archive`), or
-use `apptainer remote build`.
-
-**The build is killed, or fails with `no space left on device`** — `/tmp` is often a small,
-memory-backed tmpfs. `build_apptainer.sh` already redirects Apptainer's scratch and cache into the
-output directory; use `--tmpdir` to point somewhere with more room.
-
-**A service fails writing to a path that is not bind-mounted** — its writable layer is too small.
-Add the image to `overlay_image_patterns` to give it a file-backed overlay, and raise
-`overlay_size_mb` if needed. File-backed overlays also work around shared filesystems such as GPFS
-and Lustre, where directory overlays fail because overlayfs upper layers need xattr support the
-filesystem does not provide.
-
-**`FATAL: while mounting ...: destination is already in use` or a missing mount point** — the
-target path does not exist inside the image and Apptainer could not create it. Setting
-`writable_tmpfs: true` (the default) usually resolves this.
-
-**GPU code does not see the device** — services get `--nv` only when the topology assigns them a
-GPU. Check `services.<name>.gpus` in your topology config, and confirm the host driver is visible
-with `apptainer exec --nv <image> nvidia-smi`.
-
-**A registry pull fails to authenticate** — export `APPTAINER_DOCKER_USERNAME` and
-`APPTAINER_DOCKER_PASSWORD`, or pull once by hand into the cache directory.
+If GPU initialization fails, check the allocation's visible devices and run
+`apptainer exec --nv <image> nvidia-smi` on the allocated node. For write failures, check bind
+permissions and choose tmpfs or a service overlay large enough for the workload.

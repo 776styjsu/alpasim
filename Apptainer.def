@@ -2,7 +2,7 @@
 # Dockerfile without needing a Docker daemon.
 #
 # Build with the wrapper, which stages a slim context and sets up scratch dirs:
-#   ./build_apptainer.sh
+#   ./build_apptainer.sh --from-def
 #
 # Or directly (the bind makes ~/.netrc available for private dependencies; it is
 # not stored in the image):
@@ -39,8 +39,7 @@ From: nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
         && rm -rf /var/lib/apt/lists/*
 
     # uv (the Dockerfile copies it from ghcr.io/astral-sh/uv)
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="/root/.local/bin:$PATH"
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 
     # Rust toolchain, required to build the utils_rs maturin extension
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -60,6 +59,7 @@ From: nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
     find /repo -name ".venv" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
     export UV_LINK_MODE=copy
+    export UV_PYTHON_INSTALL_DIR=/opt/python
 
     # Compile protos
     cd /repo/src/grpc
@@ -67,7 +67,7 @@ From: nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
     uv run compile-protos --no-sync
 
     cd /repo
-    uv sync --extra all
+    uv sync --extra all --extra recipes
 
     # PyG compiled extensions, from wheels matching the installed torch + CUDA.
     # Versions mirror the Dockerfile's build args.
@@ -81,7 +81,7 @@ From: nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
     rm -f /root/.netrc
 
 %environment
-    export PATH="/root/.local/bin:/root/.cargo/bin:$PATH"
+    export UV_PYTHON_INSTALL_DIR=/opt/python
     export UV_CACHE_DIR=/tmp/uv-cache
     export UV_NO_SYNC=1
     export UV_LINK_MODE=copy

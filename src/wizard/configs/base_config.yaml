@@ -76,27 +76,24 @@ wizard:
   # docs/APPTAINER.md and `deploy=local_apptainer`.
   apptainer:
     # Directories searched for pre-built `.sif` files or sandbox directories,
-    # named after the image (`alpasim-base:0.1.0` -> `alpasim_base_0.1.0.sif`).
+    # named by build_apptainer.sh using the full image reference.
     image_caches: []
     # Pull `docker://<image>` when no cached image matches. Set to false on
     # clusters without outbound network access to fail fast instead.
     registry_fallback: true
     # Absolute path to the apptainer binary if it is not on PATH.
     binary: apptainer
+    cleanenv: true
     # Extra flags for every `apptainer exec`, e.g. ["--containall"].
     extra_exec_args: []
     # Environment set in every container ("VAR=value", or "VAR" to pass through).
     environments:
-      - "UV_PROJECT_ENVIRONMENT=/repo/.venv"
       - "PYTHONDONTWRITEBYTECODE=1"
     # Working directory for services that do not set `workdir` themselves.
     workdir: /repo
     # In-memory writable layer; disable if Apptainer cannot set up overlays.
     writable_tmpfs: true
-    # Images matching these substrings get a file-backed ext3 overlay instead of
-    # a tmpfs one, for entrypoints that write more than tmpfs can hold.
-    overlay_image_patterns: []
-    overlay_size_mb: 4096
+
 
   # the different containers will use ports {baseport}, {baseport+1}, ...
   # usually not needed to modify

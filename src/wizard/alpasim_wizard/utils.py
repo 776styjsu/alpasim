@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025-2026 NVIDIA Corporation
 
+import hashlib
 import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 import sys
 import uuid
@@ -101,12 +103,11 @@ def image_url_to_sqsh_filename(image: str, squash_caches: list[str]) -> str:
 
 
 def image_to_apptainer_basename(image: str) -> str:
-    """Return the canonical .sif basename for a docker image URL (e.g. for caching).
-
-    Uses the same stem rules as `image_to_sqsh_basename`, so the two caches are
-    named consistently: `alpasim-base:0.1.0` -> `alpasim_base_0.1.0.sif`.
-    """
-    return Path(image).name.replace(":", "_").replace("-", "_") + ".sif"
+    """Name a cached image using its full reference, including registry and tag."""
+    reference = image.removeprefix("docker://")
+    name = re.sub(r"[^a-zA-Z0-9._-]", "_", reference.rsplit("/", 1)[-1])[:80]
+    digest = hashlib.sha256(reference.encode()).hexdigest()[:16]
+    return f"{name}-{digest}.sif"
 
 
 def resolve_apptainer_image(
@@ -114,49 +115,40 @@ def resolve_apptainer_image(
     image_caches: list[str],
     registry_fallback: bool = True,
 ) -> str:
-    """Resolve a docker image URL to something `apptainer exec` can run.
+    """Accept local images and native URIs, with optional OCI cache lookup.
 
-    Searches `image_caches` in order for a pre-built image, accepting a `.sif`
-    file, a `.sandbox` directory, or an extracted directory named after the
-    image stem. Unlike the enroot path there is no import-on-demand step:
-    Apptainer can run a registry reference directly.
-
-    Args:
-        image: Full docker image URL (e.g. docker.io/org/repo:tag).
-        image_caches: Directories to search for pre-built images.
-        registry_fallback: If True, return a `docker://` URI when no cached
-            image matches, letting Apptainer pull and convert at runtime.
-
-    Returns:
-        Absolute path to a cached image, or a `docker://<image>` URI.
-
-    Raises:
-        ValueError: If nothing matched and `registry_fallback` is False.
+    Explicit URIs are passed through. registry_fallback controls only implicit
+    pulls of bare OCI references. Missing local paths always fail immediately.
     """
+    if "://" not in image:
+        path = Path(image).expanduser()
+        if path.is_file() or path.is_dir():
+            return str(path.resolve())
+        if image.startswith(("/", "./", "../", "~")) or path.suffix in (
+            ".sif",
+            ".sandbox",
+        ):
+            raise FileNotFoundError(f"Apptainer image does not exist: {image}")
+    if "://" in image and not image.startswith("docker://"):
+        return image
+
     stem = Path(image_to_apptainer_basename(image)).stem
     candidates = [
-        os.path.join(cache_dir, name)
-        for cache_dir in image_caches
-        for name in (f"{stem}.sif", f"{stem}.sandbox", stem)
+        Path(cache).expanduser() / f"{stem}{suffix}"
+        for cache in image_caches
+        for suffix in (".sif", ".sandbox")
     ]
-
     for candidate in candidates:
-        if os.path.isfile(candidate) or os.path.isdir(candidate):
-            return os.path.abspath(candidate)
-
+        if candidate.is_file() or candidate.is_dir():
+            return str(candidate.resolve())
+    if image.startswith("docker://"):
+        return image
     if registry_fallback:
-        logger.info(
-            "No cached Apptainer image for %s in %s; falling back to docker:// pull",
-            image,
-            image_caches or "[]",
-        )
         return f"docker://{image}"
-
     raise ValueError(
-        f"Could not find an Apptainer image for {image!r} and "
-        "wizard.apptainer.registry_fallback is disabled. Build one with "
-        f"./build_apptainer.sh (expected {stem}.sif) or add its directory to "
-        f"wizard.apptainer.image_caches; searched: {candidates}."
+        f"No cached Apptainer image for {image!r}; searched {candidates}. "
+        "Set services.<name>.image to a local SIF or sandbox, or prepare one "
+        f"with ./build_apptainer.sh --from-registry {shlex.quote(image)}."
     )
 
 

@@ -45,6 +45,9 @@ COPY . /repo
 
 # Configure uv
 ENV UV_LINK_MODE=copy
+# Managed interpreters must be accessible when Apptainer runs as the calling user.
+ENV UV_PYTHON_INSTALL_DIR=/opt/python
+ENV UV_PROJECT_ENVIRONMENT=/repo/.venv
 
 # Compile protos
 WORKDIR /repo/src/grpc

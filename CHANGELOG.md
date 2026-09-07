@@ -2,6 +2,16 @@
 This document lists major updates which change UX and require adaptation.
 It should be sorted by date (more recent on top) and link to MRs which introduce the changes.
 
+## Apptainer image and lifecycle simplification (07.09.26)
+
+Apptainer accepts local SIF/sandbox paths and native URIs, with cache names derived
+from the full image reference. Wizard and standalone runs execute the same script,
+including per-service logs, services-only operation, and bounded interruption cleanup.
+GPU indices resolve within the allocation at execution time. Host environments are
+cleaned by default; image environments are preserved. Service-specific
+`apptainer_overlay_size_mb` replaces image-pattern overlay selection. Image conversion
+is the recommended workflow; native builds use `build_apptainer.sh --from-def`.
+
 ## Apptainer deployment (30.07.26)
 
 `wizard.run_method=APPTAINER` runs the simulation with

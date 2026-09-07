@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build (or convert) an Apptainer image for AlpaSim. No Docker daemon required.
 #
-#   ./build_apptainer.sh                                   # build from Apptainer.def
+#   ./build_apptainer.sh --from-def                        # optional source build
 #   ./build_apptainer.sh --from-registry docker://IMAGE     # convert a published image
 #   ./build_apptainer.sh --from-archive alpasim.tar         # convert `docker save` output
 #
@@ -14,7 +14,7 @@ set -euo pipefail
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 BUILD_FORMAT="sif"
-SOURCE_KIND="def"
+SOURCE_KIND=""
 SOURCE_REF=""
 OUTPUT_PATH=""
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/sif-cache}"
@@ -42,7 +42,7 @@ Options:
                           (default: alpasim-base:<version in pyproject.toml>)
       --format FORMAT     sif (default) or sandbox (a directory; no mksquashfs
                           and no fakeroot needed for the final packing step)
-      --from-def          Build from Apptainer.def (default)
+      --from-def          Build from Apptainer.def (requires fakeroot/root)
       --from-registry REF Convert an existing image, e.g. docker://ghcr.io/org/img:tag
       --from-archive FILE Convert a tarball produced by `docker save`
       --netrc PATH        .netrc used for private dependencies during a def
@@ -102,10 +102,11 @@ repo_version() {
 # `image_to_apptainer_basename` in src/wizard/alpasim_wizard/utils.py; the test
 # `test_apptainer_image_name_matches_build_script` checks that it does.
 image_basename() {
-    local image="$1" stem
+    local image="${1#docker://}" stem digest
     stem="${image##*/}"
-    stem="${stem//:/_}"
-    stem="${stem//-/_}"
+    stem="$(printf '%s' "$stem" | LC_ALL=C sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-80)"
+    digest="$(printf '%s' "$image" | sha256sum)"
+    stem="$stem-${digest:0:16}"
     if [ "$BUILD_FORMAT" = "sandbox" ]; then
         printf '%s.sandbox\n' "$stem"
     else
@@ -133,10 +134,17 @@ if [ "$PRINT_CONTEXT_PATHS" = "yes" ]; then
     exit 0
 fi
 
+if [ -z "$SOURCE_KIND" ]; then
+    echo "Choose --from-registry IMAGE (recommended), --from-archive FILE, or --from-def." >&2
+    exit 2
+fi
+
 if [ -z "$OUTPUT_PATH" ]; then
     OUTPUT_PATH="$OUTPUT_DIR/$(image_basename "$IMAGE_TAG")"
 fi
-OUTPUT_DIR="$(dirname -- "$OUTPUT_PATH")"
+mkdir -p "$(dirname -- "$OUTPUT_PATH")"
+OUTPUT_DIR="$(cd -- "$(dirname -- "$OUTPUT_PATH")" && pwd)"
+OUTPUT_PATH="$OUTPUT_DIR/$(basename -- "$OUTPUT_PATH")"
 
 find_apptainer_bin() {
     if [ -n "${APPTAINER_BIN:-}" ]; then
@@ -150,15 +158,6 @@ find_apptainer_bin() {
             return 0
         fi
     done
-    # Environment modules: load only the unversioned name, so no particular
-    # cluster's version is baked in here.
-    if type module >/dev/null 2>&1; then
-        module load apptainer >/dev/null 2>&1 || true
-        if command -v apptainer >/dev/null 2>&1; then
-            command -v apptainer
-            return 0
-        fi
-    fi
     return 1
 }
 
@@ -174,9 +173,11 @@ fi
 
 # Keep scratch and cache off /tmp: it is a memory-backed tmpfs on many clusters,
 # where unpacking a multi-gigabyte image gets the build OOM-killed.
-export APPTAINER_TMPDIR="${TMPDIR_OVERRIDE:-$OUTPUT_DIR/tmp}"
+export APPTAINER_TMPDIR="${TMPDIR_OVERRIDE:-${APPTAINER_TMPDIR:-$OUTPUT_DIR/tmp}}"
 export APPTAINER_CACHEDIR="${APPTAINER_CACHEDIR:-$OUTPUT_DIR/cache}"
 mkdir -p "$OUTPUT_DIR" "$APPTAINER_TMPDIR" "$APPTAINER_CACHEDIR"
+export APPTAINER_TMPDIR="$(cd -- "$APPTAINER_TMPDIR" && pwd)"
+export APPTAINER_CACHEDIR="$(cd -- "$APPTAINER_CACHEDIR" && pwd)"
 
 BUILD_ARGS=()
 if [ "$BUILD_FORMAT" = "sandbox" ]; then
@@ -197,7 +198,9 @@ echo "  image:     $OUTPUT_PATH"
 echo "  format:    $BUILD_FORMAT"
 
 BUILD_CONTEXT_DIR=""
+STAGING_DIR="$(mktemp -d "$APPTAINER_TMPDIR/alpasim-build-XXXXXX")"
 cleanup() {
+    rm -rf "$STAGING_DIR"
     if [ -n "$BUILD_CONTEXT_DIR" ] && [ -d "$BUILD_CONTEXT_DIR" ]; then
         rm -rf "$BUILD_CONTEXT_DIR"
     fi
@@ -261,9 +264,10 @@ case "$SOURCE_KIND" in
 
         if [ -f "$NETRC_PATH" ]; then
             echo "Binding $NETRC_PATH read-only for private dependencies"
+            NETRC_PATH="$(cd -- "$(dirname -- "$NETRC_PATH")" && pwd)/$(basename -- "$NETRC_PATH")"
             BUILD_ARGS+=(--bind "${NETRC_PATH}:/run/netrc:ro")
         else
-            echo "NOTE: $NETRC_PATH not found; private dependencies will be skipped."
+            echo "NOTE: $NETRC_PATH not found; private dependencies require other configured credentials."
         fi
 
         BUILD_TARGET="Apptainer.def"
@@ -272,8 +276,7 @@ case "$SOURCE_KIND" in
 esac
 
 # Build to scratch first, so a failed build leaves any previous image intact.
-STAGED_OUTPUT="$APPTAINER_TMPDIR/$(basename -- "$OUTPUT_PATH")"
-rm -rf "$STAGED_OUTPUT"
+STAGED_OUTPUT="$STAGING_DIR/$(basename -- "$OUTPUT_PATH")"
 
 set -x
 if ! (cd "$BUILD_CWD" && "$APPTAINER_BIN" build "${BUILD_ARGS[@]}" "$STAGED_OUTPUT" "$BUILD_TARGET"); then
@@ -303,7 +306,7 @@ cat <<EOF
 Image: $OUTPUT_PATH
 
 Smoke test:
-  $APPTAINER_BIN exec --nv "$OUTPUT_PATH" uv run python -c 'import torch; print(torch.cuda.is_available())'
+  $APPTAINER_BIN exec --nv --pwd /repo "$OUTPUT_PATH" uv run python -c 'import torch; print(torch.cuda.is_available())'
 
 Run a simulation:
   uv run alpasim_wizard deploy=local_apptainer topology=1gpu driver=vavam \\
