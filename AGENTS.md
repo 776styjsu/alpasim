@@ -6,6 +6,7 @@ Alpasim is a lightweight, data-driven research simulator for autonomous vehicle 
 
 ## Documentation
 
+- **Repository layout, experiment data, cleanup log** → [docs/REPO_MAP.md](docs/REPO_MAP.md). Read this first in a working copy — it explains what each top-level entry is, where generated output belongs, and which root-level artifacts must not be moved.
 - **User docs** → [docs/ONBOARDING.md](docs/ONBOARDING.md), [docs/TUTORIAL.md](docs/TUTORIAL.md), [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - **Design and data** → [docs/DESIGN.md](docs/DESIGN.md), [docs/DATA_PIPELINE.md](docs/DATA_PIPELINE.md)
 - **Coordinate frames, coding style, contributing** → [CONTRIBUTING.md](CONTRIBUTING.md)

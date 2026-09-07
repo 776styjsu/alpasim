@@ -263,7 +263,7 @@ def build_route_consistent_reference(
     start_nodes = [
         node
         for dist, node in start_candidates[:max_start_candidates]
-        if dist <= max(3.0, min_start_dist + 1.0)
+        if dist <= max(2.0, min_start_dist + 1.0)
     ]
 
     traj_steps = np.diff(trajectory_xy, axis=0)

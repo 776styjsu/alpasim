@@ -17,17 +17,15 @@ __pycache__/
 benchmark_llm_matrix/
 .env
 
-# Local experiment outputs (rollouts, benchmarks, plots, logs)
+# Local experiment outputs. Relocated artifacts live under /experiments/; the
+# root-level entries below are load-bearing inputs (see docs/REPO_MAP.md).
+/experiments/
 /tutorial_alpamayo*
-/tutorial_archive/
-/archive/
 /benchmark*
-/nurec_label_coverage_*
-/result.json
-/*_trajectory_plots/
 /logs/
 /*.log
 /sif-cache/
+/SafeVLA/
 *.bak
 *.bak_*
 *.tmp

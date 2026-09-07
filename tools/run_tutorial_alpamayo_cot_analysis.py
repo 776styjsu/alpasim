@@ -13,7 +13,8 @@ Default behavior:
   - Per-scene: tracked via `scene_resume.json`
 
 API key:
-- You can fill `API_KEY_PLACEHOLDER` later, or pass `--api-key`, or set GEMINI_API_KEY.
+- By default, load `ALPASIM_COT_ANALYSIS_API_KEY` from the repository `.env`.
+- `--api-key` overrides the value loaded from `.env`.
 - If no key is provided, `cot_analysis` runs in dry-run mode.
 """
 
@@ -26,8 +27,46 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Fill this later if you want to hardcode your key locally.
-API_KEY_PLACEHOLDER = "AIzaSyCViavWJHd47-XNntK-UgictxfBc0qFcno"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_ENV_FILE = REPO_ROOT / ".env"
+API_KEY_ENV = "ALPASIM_COT_ANALYSIS_API_KEY"
+PROVIDER_API_KEY_ENVS = {
+    "uva": "UVA_RC_GENAI_KEY",
+    "openai": "OPENAI_API_KEY",
+    "qwen3_4b_fp8": "QWEN3_API_KEY",
+    "qwen35_4b_fp8": "QWEN35_API_KEY",
+}
+
+
+def load_env_file(path: Path) -> None:
+    """Load an env file without overwriting variables already in the process."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            os.environ.setdefault(key, value)
+
+
+def resolve_api_key(
+    cli_api_key: str | None, env_file: Path, provider: str
+) -> str | None:
+    """Resolve the labeling key with CLI taking precedence over `.env`."""
+    if cli_api_key:
+        return cli_api_key
+    load_env_file(env_file)
+    api_key = os.environ.get(API_KEY_ENV) or None
+    if api_key and api_key.startswith("${") and api_key.endswith("}"):
+        api_key = os.environ.get(api_key[2:-1]) or None
+    return api_key or os.environ.get(PROVIDER_API_KEY_ENVS[provider]) or None
 
 
 @dataclass
@@ -127,16 +166,29 @@ def parse_args() -> argparse.Namespace:
         help="Analyze every Nth timestep inside each ASL",
     )
     parser.add_argument(
+        "--provider",
+        type=str,
+        default="uva",
+        choices=tuple(PROVIDER_API_KEY_ENVS),
+        help="cot_analysis provider backend (default: %(default)s)",
+    )
+    parser.add_argument(
         "--model",
         type=str,
-        default="gemini-3-flash-preview",
-        help="Gemini model passed to cot_analysis",
+        default=None,
+        help="Optional model override; defaults to the selected provider's model",
     )
     parser.add_argument(
         "--api-key",
         type=str,
         default=None,
-        help="Gemini API key. Overrides placeholder and GEMINI_API_KEY.",
+        help=f"API key. Overrides ${API_KEY_ENV} loaded from --env-file.",
+    )
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=DEFAULT_ENV_FILE,
+        help="Environment file containing the dedicated API key (default: %(default)s)",
     )
     parser.add_argument(
         "--delay",
@@ -153,7 +205,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--no-images",
         action="store_true",
-        help="Text-only mode (do not send images to Gemini)",
+        help="Text-only mode (do not send images to the labeling provider)",
     )
     parser.add_argument(
         "--log-level",
@@ -171,12 +223,14 @@ def parse_args() -> argparse.Namespace:
         "--retry-errors",
         action="store_true",
         help="Re-process entries that have API errors (e.g. 429 RESOURCE_EXHAUSTED). "
-             "Un-marks completed scenes that have errors and retries them.",
+        "Un-marks completed scenes that have errors and retries them.",
     )
     return parser.parse_args()
 
 
-def find_scene_dirs(tutorial_root: Path, scene_start: int, scene_end: int) -> list[Path]:
+def find_scene_dirs(
+    tutorial_root: Path, scene_start: int, scene_end: int
+) -> list[Path]:
     scene_dirs: list[Path] = []
     for scene_dir in sorted(tutorial_root.glob("scene_*")):
         if not scene_dir.is_dir():
@@ -209,7 +263,8 @@ def count_errors_in_output(output_path: Path) -> int:
         data = json.loads(output_path.read_text())
         results = data.get("results", []) if isinstance(data, dict) else data
         return sum(
-            1 for r in results
+            1
+            for r in results
             if isinstance(r, dict) and "error" in r.get("evaluation", r)
         )
     except (json.JSONDecodeError, KeyError):
@@ -221,7 +276,9 @@ _QUOTA_EXHAUSTED_EXIT_CODE = 3
 
 
 def run_single_asl(
-    args: argparse.Namespace, asl_path: Path, output_path: Path,
+    args: argparse.Namespace,
+    asl_path: Path,
+    output_path: Path,
 ) -> subprocess.CompletedProcess[str]:
     cmd = [
         "uv",
@@ -235,8 +292,8 @@ def run_single_asl(
         str(output_path),
         "--every_nth",
         str(args.every_nth),
-        "--model",
-        args.model,
+        "--provider",
+        args.provider,
         "--delay",
         str(args.delay),
         "--camera_id",
@@ -246,16 +303,18 @@ def run_single_asl(
         "--resume",
     ]
 
+    if args.model:
+        cmd.extend(["--model", args.model])
+
     if args.retry_errors:
         cmd.append("--retry_errors")
 
     if args.no_images:
         cmd.append("--no_images")
 
-    if args.api_key:
-        cmd.extend(["--api_key", args.api_key])
-
     env = os.environ.copy()
+    if args.api_key:
+        env[PROVIDER_API_KEY_ENVS[args.provider]] = args.api_key
     extra_pythonpath = [
         str(Path("src")),
         str(Path("src/tools")),
@@ -279,9 +338,7 @@ def main() -> int:
     if not tutorial_root.exists():
         raise FileNotFoundError(f"Tutorial root not found: {tutorial_root}")
 
-    # Resolve API key precedence: CLI > placeholder > env in cot_analysis
-    if args.api_key is None and API_KEY_PLACEHOLDER.strip():
-        args.api_key = API_KEY_PLACEHOLDER.strip()
+    args.api_key = resolve_api_key(args.api_key, args.env_file, args.provider)
 
     scene_dirs = find_scene_dirs(tutorial_root, args.scene_start, args.scene_end)
     if not scene_dirs:
@@ -301,7 +358,10 @@ def main() -> int:
     if args.retry_errors:
         print("Retry-errors mode: will re-process entries with API errors.")
     if not args.api_key:
-        print("No API key provided. This will run in dry-run mode until you fill it in.")
+        print(
+            f"No API key provided. Set {API_KEY_ENV} in {args.env_file} "
+            "or pass --api-key; cot_analysis will run in dry-run mode."
+        )
 
     for scene_idx, scene_dir in enumerate(scene_dirs, start=1):
         rollouts_dir = scene_dir / "rollouts"
@@ -309,10 +369,14 @@ def main() -> int:
         scene_output_dir.mkdir(parents=True, exist_ok=True)
         state_path = scene_output_dir / "scene_resume.json"
 
-        scene_asls = sorted(rollouts_dir.rglob("*.asl")) if rollouts_dir.exists() else []
+        scene_asls = (
+            sorted(rollouts_dir.rglob("*.asl")) if rollouts_dir.exists() else []
+        )
         total_asls += len(scene_asls)
 
-        print(f"\n[{scene_idx}/{total_scenes}] Scene: {scene_dir.name} | ASLs: {len(scene_asls)}")
+        print(
+            f"\n[{scene_idx}/{total_scenes}] Scene: {scene_dir.name} | ASLs: {len(scene_asls)}"
+        )
 
         state = SceneRunState.load(scene_dir=scene_dir, state_path=state_path)
 
@@ -337,7 +401,9 @@ def main() -> int:
                         )
                     else:
                         skipped_asls += 1
-                        print(f"  [{asl_idx}/{len(scene_asls)}] SKIP completed (clean): {rel_asl}")
+                        print(
+                            f"  [{asl_idx}/{len(scene_asls)}] SKIP completed (clean): {rel_asl}"
+                        )
                         continue
                 else:
                     skipped_asls += 1
@@ -369,12 +435,18 @@ def main() -> int:
                 state.mark_completed(asl_path, error_count=error_count)
                 succeeded_asls += 1
                 if error_count > 0:
-                    print(f"    status: OK (but {error_count} entries still have errors)")
+                    print(
+                        f"    status: OK (but {error_count} entries still have errors)"
+                    )
                 else:
                     print("    status: OK")
             else:
                 failed_asls += 1
-                reason = (proc.stderr or proc.stdout).strip().splitlines()[-1] if (proc.stderr or proc.stdout) else "unknown error"
+                reason = (
+                    (proc.stderr or proc.stdout).strip().splitlines()[-1]
+                    if (proc.stderr or proc.stdout)
+                    else "unknown error"
+                )
                 state.mark_failed(asl_path, reason)
                 print(f"    status: FAIL ({reason})")
 
