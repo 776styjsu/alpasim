@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2025 NVIDIA Corporation
+# Copyright (c) 2025-2026 NVIDIA Corporation
 
 """Apptainer deployment strategy."""
 
@@ -13,7 +13,7 @@ from typing import Any, List, Optional
 from ..context import WizardContext
 from ..services import ContainerDefinition, build_container_set
 from ..utils import image_url_to_apptainer_image
-from .dispatcher import dispatch_command
+from .dispatcher import dispatch_background, dispatch_command
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +86,10 @@ class ApptainerDeployment:
             if c.command == "noop":
                 continue
             cmd = self._to_apptainer_exec(c)
-            dispatch_command(
+            dispatch_background(
                 cmd,
                 log_dir=Path(self.context.cfg.wizard.log_dir),
                 dry_run=self.context.cfg.wizard.dry_run,
-                blocking=False,
             )
 
         # Wait for services to come up before launching runtime
@@ -103,7 +102,6 @@ class ApptainerDeployment:
                 cmd,
                 log_dir=Path(self.context.cfg.wizard.log_dir),
                 dry_run=self.context.cfg.wizard.dry_run,
-                blocking=True,
             )
 
     # ------------------------------------------------------------------
@@ -143,7 +141,7 @@ class ApptainerDeployment:
         # Prepend module load so apptainer is available on HPC modules
         parts: list[str] = [
             "module load apptainer >/dev/null 2>&1 || module load apptainer/1.3.4 >/dev/null 2>&1 || true;",
-            "apptainer exec"
+            "apptainer exec",
         ]
 
         # GPU support
@@ -164,7 +162,9 @@ class ApptainerDeployment:
         elif is_old_nurec:
             parts.append("--pwd /app/pycena_run.runfiles/nre_repo")
         elif is_new_nre:
-            parts.append("--pwd /app/internal/scripts/pycena/runtime/pycena_run.runfiles/_main")
+            parts.append(
+                "--pwd /app/internal/scripts/pycena/runtime/pycena_run.runfiles/_main"
+            )
         else:
             parts.append("--pwd /repo")
 
@@ -196,7 +196,9 @@ class ApptainerDeployment:
         # can remove and recreate freely. We create the .img lazily in the
         # dispatched bash command so re-runs are idempotent.
         if is_old_nurec or is_new_nre:
-            port = container.service_instances[0].address.port
+            address = container.service_instances[0].address
+            assert address is not None, "NRE service requires an address"
+            port = address.port
             overlay_img = (
                 Path(self.context.cfg.wizard.log_dir)
                 / "nre_overlays"

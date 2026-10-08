@@ -3,6 +3,7 @@
 
 # mypy: disable-error-code=no-untyped-def
 """Main entry point for Alpasim wizard."""
+
 from __future__ import annotations
 
 import logging
@@ -14,7 +15,12 @@ import git
 
 from .configuration import ConfigurationManager
 from .context import WizardContext
-from .deployment import ApptainerDeployment, DockerComposeDeployment, SlurmDeployment
+from .deployment import (
+    ApptainerDeployment,
+    DockerComposeDeployment,
+    SlurmDeployment,
+    SlurmEnrootDeployment,
+)
 from .schema import AlpasimConfig, RunMethod
 
 logger = logging.getLogger("alpasim_wizard")
@@ -67,23 +73,32 @@ class AlpasimWizard:
     def cast(self) -> None:
         """Main execution method - simplified with refactored components."""
 
+        run_method = self.context.cfg.wizard.run_method
+        if (
+            run_method == RunMethod.SLURM_ENROOT
+            and not self.context.cfg.wizard.slurm_job_id
+        ):
+            raise ValueError("SLURM_ENROOT requires an active Slurm allocation")
+
         # Normal execution path
         self.maybe_clone_driver_code()
 
         # Do this for all run methods to generate docker compose config files.
         docker_compose_deployment = DockerComposeDeployment(self.context)
         docker_compose_deployment.generate_docker_compose()
-        slurm_deployment = SlurmDeployment(self.context)
-        apptainer_deployment = ApptainerDeployment(self.context)
-        
-        # Use docker compose container set for DOCKER_COMPOSE and NONE
-        # (NONE generates docker-compose files that will be run manually)
-        if self.context.cfg.wizard.run_method in (RunMethod.DOCKER_COMPOSE, RunMethod.NONE):
-            container_set = docker_compose_deployment.container_set
-        elif self.context.cfg.wizard.run_method == RunMethod.APPTAINER:
-            container_set = apptainer_deployment.container_set
-        else:
+
+        slurm_deployment: SlurmDeployment | None = None
+        apptainer_deployment: ApptainerDeployment | None = None
+        container_set = docker_compose_deployment.container_set
+        if run_method == RunMethod.SLURM:
+            slurm_deployment = SlurmDeployment(self.context)
             container_set = slurm_deployment.container_set
+        elif run_method == RunMethod.SLURM_ENROOT:
+            slurm_deployment = SlurmEnrootDeployment(self.context)
+            container_set = slurm_deployment.container_set
+        elif run_method == RunMethod.APPTAINER:
+            apptainer_deployment = ApptainerDeployment(self.context)
+            container_set = apptainer_deployment.container_set
 
         # With the container set, we can now generate the configs and save them.
         config_manager = ConfigurationManager(self.context.cfg.wizard.log_dir)
@@ -91,17 +106,17 @@ class AlpasimWizard:
 
         if (
             self.context.cfg.wizard.enable_mps
-            and self.context.cfg.wizard.run_method != RunMethod.SLURM
+            and not self.context.cfg.wizard.run_method.is_slurm
         ):
             raise ValueError("wizard.enable_mps is only supported on SLURM")
 
         # Handle different run methods
         try:
-            if self.context.cfg.wizard.run_method == RunMethod.SLURM:
+            if slurm_deployment is not None:
                 slurm_deployment.deploy_all_services()
             elif self.context.cfg.wizard.run_method == RunMethod.DOCKER_COMPOSE:
                 docker_compose_deployment.deploy_all_services()
-            elif self.context.cfg.wizard.run_method == RunMethod.APPTAINER:
+            elif apptainer_deployment is not None:
                 apptainer_deployment.deploy_all_services()
             elif self.context.cfg.wizard.run_method == RunMethod.NONE:
                 logger.info(

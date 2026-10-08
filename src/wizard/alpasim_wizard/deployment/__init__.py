@@ -6,9 +6,11 @@
 from .apptainer import ApptainerDeployment
 from .docker_compose import DockerComposeDeployment
 from .slurm import SlurmDeployment
+from .slurm_enroot import SlurmEnrootDeployment
 
 __all__ = [
     "ApptainerDeployment",
     "DockerComposeDeployment",
     "SlurmDeployment",
+    "SlurmEnrootDeployment",
 ]
