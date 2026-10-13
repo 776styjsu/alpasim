@@ -199,7 +199,7 @@ for idx in "${!SCENES[@]}"; do
     alpasim_wizard
     "deploy=${DEPLOY}"
     "topology=${TOPOLOGY}"
-    "wizard.sif_caches=[$SIF_CACHE]"
+    "wizard.apptainer.image_caches=[$SIF_CACHE]"
     "wizard.log_dir=${run_dir}"
     "driver=${DRIVER}"
     "defines.nre_cache_size=${NRE_CACHE_SIZE}"

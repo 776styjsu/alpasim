@@ -1,150 +1,332 @@
-#!/bin/bash
-
-# Build an Apptainer SIF image for AlpaSim — no Docker required.
+#!/usr/bin/env bash
+# Build (or convert) an Apptainer image for AlpaSim. No Docker daemon required.
 #
-# Usage:
-#   ./build_apptainer.sh                # uses default tag
-#   SIF_FILE=my_image.sif ./build_apptainer.sh  # custom output filename
+#   ./build_apptainer.sh --from-def                        # optional source build
+#   ./build_apptainer.sh --from-registry docker://IMAGE     # convert a published image
+#   ./build_apptainer.sh --from-archive alpasim.tar         # convert `docker save` output
 #
-# By default the host's ~/.netrc is bind-mounted (read-only) into the build
-# so that uv/git can access private repos.  Override with NETRC_PATH.
+# The image is written to ./sif-cache under the name the wizard looks for, so
+# `deploy=local_apptainer` finds it without further configuration.
+# See docs/APPTAINER.md.
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$SCRIPT_DIR"
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "Building Apptainer image in $REPO_ROOT"
-set -x
+BUILD_FORMAT="sif"
+SOURCE_KIND=""
+SOURCE_REF=""
+OUTPUT_PATH=""
+OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/sif-cache}"
+IMAGE_TAG=""
+NETRC_PATH="${NETRC_PATH:-$HOME/.netrc}"
+USE_FAKEROOT="auto"
+TMPDIR_OVERRIDE=""
+PRINT_IMAGE_NAME="no"
+PRINT_CONTEXT_PATHS="no"
 
-cleanup() {
-    if [ -n "${BUILD_CONTEXT_DIR:-}" ] && [ -d "$BUILD_CONTEXT_DIR" ]; then
-        rm -rf "$BUILD_CONTEXT_DIR"
+# Repo paths copied into a def build's context, and from there into the image.
+# Mirrors the allowlist in .dockerignore; `test_build_context_covers_dockerignore`
+# checks that it stays in step. Missing entries are skipped.
+CONTEXT_PATHS=(Apptainer.def pyproject.toml uv.lock README.md src plugins e2e_challenge)
+
+usage() {
+    # Reprint this file's header comment block, minus the shebang.
+    awk 'NR == 1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "${BASH_SOURCE[0]}"
+    cat <<'EOF'
+
+Options:
+  -o, --output PATH       Full output path for the image
+      --output-dir DIR    Directory to write the image into (default: ./sif-cache)
+      --tag IMAGE         Docker-style image name to derive the filename from
+                          (default: alpasim-base:<tag the wizard resolves>)
+      --format FORMAT     sif (default) or sandbox (a directory; no mksquashfs
+                          and no fakeroot needed for the final packing step)
+      --from-def          Build from Apptainer.def (requires fakeroot/root)
+      --from-registry REF Convert an existing image, e.g. docker://ghcr.io/org/img:tag
+      --from-archive FILE Convert a tarball produced by `docker save`
+      --netrc PATH        .netrc used for private dependencies during a def
+                          build (default: ~/.netrc; never stored in the image)
+      --fakeroot          Force --fakeroot
+      --no-fakeroot       Never pass --fakeroot
+      --tmpdir DIR        Scratch directory for the build (default: <output-dir>/tmp)
+      --print-image-name  Print the filename the wizard expects, then exit
+      --print-context-paths
+                          Print the repo paths copied into the image, then exit
+  -h, --help              Show this help
+
+Environment:
+  APPTAINER_BIN           Path to the apptainer/singularity binary
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o|--output) OUTPUT_PATH="$2"; shift 2 ;;
+        --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
+        --tag) IMAGE_TAG="$2"; shift 2 ;;
+        --format) BUILD_FORMAT="$2"; shift 2 ;;
+        --from-def) SOURCE_KIND="def"; shift ;;
+        --from-registry) SOURCE_KIND="registry"; SOURCE_REF="$2"; shift 2 ;;
+        --from-archive) SOURCE_KIND="archive"; SOURCE_REF="$2"; shift 2 ;;
+        --netrc) NETRC_PATH="$2"; shift 2 ;;
+        --fakeroot) USE_FAKEROOT="yes"; shift ;;
+        --no-fakeroot) USE_FAKEROOT="no"; shift ;;
+        --tmpdir) TMPDIR_OVERRIDE="$2"; shift 2 ;;
+        --print-image-name) PRINT_IMAGE_NAME="yes"; shift ;;
+        --print-context-paths) PRINT_CONTEXT_PATHS="yes"; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
+    esac
+done
+
+case "$BUILD_FORMAT" in
+    sif|sandbox) ;;
+    *) echo "ERROR: --format must be 'sif' or 'sandbox', got '$BUILD_FORMAT'." >&2; exit 2 ;;
+esac
+
+# Size of a directory. Uses apparent size because block accounting lags behind
+# fresh writes on GPFS and other delayed-allocation filesystems, which makes a
+# just-staged context look far smaller than it is.
+dir_size() {
+    local out
+    out="$(du -sh --apparent-size "$1" 2>/dev/null)" || out="$(du -sh "$1" 2>/dev/null)"
+    printf '%s' "${out%%$'\t'*}"
+}
+
+repo_version() {
+    sed -n 's/^version = "\(.*\)"$/\1/p' "$REPO_ROOT/pyproject.toml" | head -n 1
+}
+
+# Base image tag for this checkout. Must stay in sync with
+# `_read_base_image_tag` in src/wizard/alpasim_wizard/setup_omegaconf.py:
+# branches that change the root pyproject.toml use the commit SHA.
+repo_base_image_tag() {
+    local version branch merge_base commit
+    version="$(repo_version)"
+    branch="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)" || branch=""
+    case "$branch" in ""|HEAD|main) printf '%s\n' "$version"; return ;; esac
+    if ! merge_base="$(git -C "$REPO_ROOT" merge-base HEAD origin/main 2>/dev/null)" \
+        || ! git -C "$REPO_ROOT" diff --name-only "$merge_base...HEAD" 2>/dev/null \
+            | grep -qx 'pyproject.toml'; then
+        printf '%s\n' "$version"
+        return
+    fi
+    commit="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+    printf '%s\n' "${commit:0:8}"
+}
+
+# Canonical image filename for a docker-style image name. Must stay in sync with
+# `image_to_apptainer_basename` in src/wizard/alpasim_wizard/utils.py; the test
+# `test_apptainer_image_name_matches_build_script` checks that it does.
+image_basename() {
+    local image="${1#docker://}" stem digest
+    stem="${image##*/}"
+    stem="$(printf '%s' "$stem" | LC_ALL=C sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-80)"
+    digest="$(printf '%s' "$image" | sha256sum)"
+    stem="$stem-${digest:0:16}"
+    if [ "$BUILD_FORMAT" = "sandbox" ]; then
+        printf '%s.sandbox\n' "$stem"
+    else
+        printf '%s.sif\n' "$stem"
     fi
 }
 
-trap cleanup EXIT
+if [ -z "$IMAGE_TAG" ]; then
+    if [ "$SOURCE_KIND" = "registry" ]; then
+        # Name the output after the image being converted, so the wizard finds
+        # it under the reference it resolves.
+        IMAGE_TAG="${SOURCE_REF#*://}"
+    else
+        IMAGE_TAG="alpasim-base:$(repo_base_image_tag)"
+    fi
+fi
+
+if [ "$PRINT_IMAGE_NAME" = "yes" ]; then
+    image_basename "$IMAGE_TAG"
+    exit 0
+fi
+
+if [ "$PRINT_CONTEXT_PATHS" = "yes" ]; then
+    printf '%s\n' "${CONTEXT_PATHS[@]}"
+    exit 0
+fi
+
+if [ -z "$SOURCE_KIND" ]; then
+    echo "Choose --from-registry IMAGE (recommended), --from-archive FILE, or --from-def." >&2
+    exit 2
+fi
+
+if [ -z "$OUTPUT_PATH" ]; then
+    OUTPUT_PATH="$OUTPUT_DIR/$(image_basename "$IMAGE_TAG")"
+fi
+mkdir -p "$(dirname -- "$OUTPUT_PATH")"
+OUTPUT_DIR="$(cd -- "$(dirname -- "$OUTPUT_PATH")" && pwd)"
+OUTPUT_PATH="$OUTPUT_DIR/$(basename -- "$OUTPUT_PATH")"
 
 find_apptainer_bin() {
-    if command -v apptainer >/dev/null 2>&1; then
-        command -v apptainer
+    if [ -n "${APPTAINER_BIN:-}" ]; then
+        printf '%s\n' "$APPTAINER_BIN"
         return 0
     fi
-
-    if command -v singularity >/dev/null 2>&1; then
-        command -v singularity
-        return 0
-    fi
-
-    if type module >/dev/null 2>&1; then
-        module load apptainer >/dev/null 2>&1 || \
-            module load apptainer/1.3.4 >/dev/null 2>&1 || true
-
-        if command -v apptainer >/dev/null 2>&1; then
-            command -v apptainer
+    local candidate
+    for candidate in apptainer singularity; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            command -v "$candidate"
             return 0
         fi
-    fi
-
+    done
     return 1
 }
 
-# Build target type: "sif" or "sandbox"
-BUILD_FORMAT="${BUILD_FORMAT:-sif}"
-
-# Output image path (override with SIF_FILE env var for backward compatibility)
-SIF_FILE="${SIF_FILE:-alpasim_base_latest.sif}"
-OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/sif-cache}"
-
-if [ "$BUILD_FORMAT" = "sandbox" ]; then
-    case "$SIF_FILE" in
-        *.sif)
-            SIF_FILE="${SIF_FILE%.sif}.sandbox"
-            ;;
-    esac
+if ! APPTAINER_BIN="$(find_apptainer_bin)"; then
+    cat >&2 <<'EOF'
+ERROR: Could not find apptainer (or singularity) on PATH.
+Load it first, or point at it explicitly:
+  module load apptainer          # on clusters using environment modules
+  export APPTAINER_BIN=/path/to/apptainer
+EOF
+    exit 127
 fi
 
-case "$SIF_FILE" in
-    /*)
-        FINAL_IMAGE_PATH="$SIF_FILE"
-        ;;
-    *)
-        FINAL_IMAGE_PATH="$OUTPUT_DIR/$SIF_FILE"
-        ;;
-esac
+# Keep scratch and cache off /tmp: it is a memory-backed tmpfs on many clusters,
+# where unpacking a multi-gigabyte image gets the build OOM-killed.
+export APPTAINER_TMPDIR="${TMPDIR_OVERRIDE:-${APPTAINER_TMPDIR:-$OUTPUT_DIR/tmp}}"
+export APPTAINER_CACHEDIR="${APPTAINER_CACHEDIR:-$OUTPUT_DIR/cache}"
+mkdir -p "$OUTPUT_DIR" "$APPTAINER_TMPDIR" "$APPTAINER_CACHEDIR"
+export APPTAINER_TMPDIR="$(cd -- "$APPTAINER_TMPDIR" && pwd)"
+export APPTAINER_CACHEDIR="$(cd -- "$APPTAINER_CACHEDIR" && pwd)"
 
-IMAGE_NAME="$(basename -- "$FINAL_IMAGE_PATH")"
-
-# Path to .netrc for private-repo authentication (override with NETRC_PATH)
-NETRC_PATH="${NETRC_PATH:-$HOME/.netrc}"
-
-echo "Target image path: $FINAL_IMAGE_PATH"
-echo "Build format: $BUILD_FORMAT"
-
-# Build args
 BUILD_ARGS=()
-
-APPTAINER_BIN="${APPTAINER_BIN:-}"
-if [ -z "$APPTAINER_BIN" ]; then
-    if ! APPTAINER_BIN="$(find_apptainer_bin)"; then
-        echo "ERROR: Could not find Apptainer in PATH." >&2
-        echo "Try one of the following and rerun:" >&2
-        echo "  module load apptainer/1.3.4" >&2
-        echo "  export APPTAINER_BIN=/path/to/apptainer" >&2
-        exit 127
-    fi
+if [ "$BUILD_FORMAT" = "sandbox" ]; then
+    BUILD_ARGS+=(--sandbox)
 fi
 
-if [ "$(id -u)" -ne 0 ] && [ "${APPTAINER_USE_FAKEROOT:-1}" = "1" ]; then
+# Only a def build runs %post as root and therefore needs fakeroot; converting
+# an existing image does not.
+if [ "$USE_FAKEROOT" = "yes" ] ||
+   { [ "$USE_FAKEROOT" = "auto" ] && [ "$SOURCE_KIND" = "def" ] && [ "$(id -u)" -ne 0 ]; }; then
     BUILD_ARGS+=(--fakeroot)
 fi
 
-# Bind .netrc if it exists so %post can authenticate
-if [ -f "$NETRC_PATH" ]; then
-    echo "Binding $NETRC_PATH for private-repo access"
-    BUILD_ARGS+=(--bind "${NETRC_PATH}:/run/netrc:ro")
-else
-    echo "WARNING: $NETRC_PATH not found — private repos may fail to resolve."
+echo "=== AlpaSim Apptainer build ==="
+echo "  apptainer: $APPTAINER_BIN"
+echo "  source:    $SOURCE_KIND${SOURCE_REF:+ ($SOURCE_REF)}"
+echo "  image:     $OUTPUT_PATH"
+echo "  format:    $BUILD_FORMAT"
+
+BUILD_CONTEXT_DIR=""
+STAGING_DIR="$(mktemp -d "$APPTAINER_TMPDIR/alpasim-build-XXXXXX")"
+cleanup() {
+    rm -rf "$STAGING_DIR"
+    if [ -n "$BUILD_CONTEXT_DIR" ] && [ -d "$BUILD_CONTEXT_DIR" ]; then
+        rm -rf "$BUILD_CONTEXT_DIR"
+    fi
+}
+trap cleanup EXIT
+
+case "$SOURCE_KIND" in
+    registry)
+        BUILD_TARGET="$SOURCE_REF"
+        case "$BUILD_TARGET" in
+            *://*) ;;
+            *) BUILD_TARGET="docker://$BUILD_TARGET" ;;
+        esac
+        BUILD_CWD="$REPO_ROOT"
+        ;;
+    archive)
+        if [ ! -f "$SOURCE_REF" ]; then
+            echo "ERROR: archive not found: $SOURCE_REF" >&2
+            exit 2
+        fi
+        BUILD_TARGET="docker-archive:$(cd -- "$(dirname -- "$SOURCE_REF")" && pwd)/$(basename -- "$SOURCE_REF")"
+        BUILD_CWD="$REPO_ROOT"
+        ;;
+    def)
+        if ! command -v rsync >/dev/null 2>&1; then
+            echo "ERROR: rsync is required to stage the build context." >&2
+            echo "Install rsync, or convert a pre-built image with --from-registry/--from-archive." >&2
+            exit 127
+        fi
+        # Apptainer.def copies the build context into the image, so stage a
+        # copy holding only what the image needs. This is an allowlist for the
+        # same reason .dockerignore is one: a working repo accumulates
+        # datasets, run outputs, virtualenvs and caches next to the sources,
+        # and excluding them by name never keeps up.
+        BUILD_CONTEXT_DIR="$(mktemp -d "$APPTAINER_TMPDIR/alpasim-context-XXXXXX")"
+        echo "Staging build context in $BUILD_CONTEXT_DIR"
+        for path in "${CONTEXT_PATHS[@]}"; do
+            [ -e "$REPO_ROOT/$path" ] || continue
+            # Regenerable build output, matching .dockerignore. `utils_rs/target`
+            # is host-architecture Rust output that `uv sync` rebuilds in the
+            # image; leaving it in makes up most of the context size.
+            rsync -a \
+                --exclude '.venv' \
+                --exclude '__pycache__' \
+                --exclude '.mypy_cache' \
+                --exclude '.pytest_cache' \
+                --exclude '.ruff_cache' \
+                --exclude '*.egg-info' \
+                --exclude 'build' \
+                --exclude 'dist' \
+                --exclude 'outputs' \
+                --exclude 'runs' \
+                --exclude 'test_output' \
+                --exclude 'runtime/build.env' \
+                --exclude 'utils_rs/target' \
+                --exclude '*.sif' \
+                --exclude '*.sqsh' \
+                "$REPO_ROOT/$path" "$BUILD_CONTEXT_DIR/"
+        done
+        echo "Build context staged ($(dir_size "$BUILD_CONTEXT_DIR"))"
+
+        if [ -f "$NETRC_PATH" ]; then
+            echo "Binding $NETRC_PATH read-only for private dependencies"
+            NETRC_PATH="$(cd -- "$(dirname -- "$NETRC_PATH")" && pwd)/$(basename -- "$NETRC_PATH")"
+            BUILD_ARGS+=(--bind "${NETRC_PATH}:/run/netrc:ro")
+        else
+            echo "NOTE: $NETRC_PATH not found; private dependencies require other configured credentials."
+        fi
+
+        BUILD_TARGET="Apptainer.def"
+        BUILD_CWD="$BUILD_CONTEXT_DIR"
+        ;;
+esac
+
+# Build to scratch first, so a failed build leaves any previous image intact.
+STAGED_OUTPUT="$STAGING_DIR/$(basename -- "$OUTPUT_PATH")"
+
+set -x
+if ! (cd "$BUILD_CWD" && "$APPTAINER_BIN" build "${BUILD_ARGS[@]}" "$STAGED_OUTPUT" "$BUILD_TARGET"); then
+    set +x
+    if [ "$SOURCE_KIND" = "def" ]; then
+        cat >&2 <<'EOF'
+
+The def-file build failed. Building from a definition file needs root or a
+working `--fakeroot` setup (unprivileged user namespaces plus subuid/subgid
+mappings), which many clusters disable. Alternatives:
+  * --from-registry docker://<image>   convert an already-published image
+  * --from-archive <file.tar>          convert `docker save` output copied in
+  * --format sandbox                   avoids the SIF packing step
+  * apptainer remote build ...         build on a remote builder service
+EOF
+    fi
+    exit 1
 fi
+set +x
 
-# Set Apptainer temporary and cache directories to the output dir
-# This prevents OOM errors on HPC clusters where /tmp is a memory-backed tmpfs.
-export APPTAINER_TMPDIR="$OUTPUT_DIR/tmp"
-export APPTAINER_CACHEDIR="$OUTPUT_DIR/cache"
-mkdir -p "$APPTAINER_TMPDIR" "$APPTAINER_CACHEDIR"
+rm -rf "$OUTPUT_PATH"
+mv "$STAGED_OUTPUT" "$OUTPUT_PATH"
 
-# Remove stale output before building
-mkdir -p "$(dirname -- "$FINAL_IMAGE_PATH")"
-rm -rf "$FINAL_IMAGE_PATH"
+cat <<EOF
 
-# Build from a temporary slim context instead of copying the full repo (which may
-# include large data/outputs artifacts) into the image.
-BUILD_CONTEXT_DIR="$(mktemp -d -p "$APPTAINER_TMPDIR" -t alpasim-apptainer-build-XXXXXX)"
+=== Done ===
+Image: $OUTPUT_PATH
 
-rsync -a \
-    --exclude '.git' \
-    --exclude '.venv' \
-    --exclude 'data' \
-    --exclude 'outputs' \
-    --exclude 'tutorial*' \
-    --exclude 'tutorial_archive' \
-    --exclude 'sif-cache' \
-    --exclude 'logs' \
-    --exclude '*.sif' \
-    --exclude '*.sqsh' \
-    --exclude 'src/tools/run-on-ord/runs' \
-    "$REPO_ROOT/" "$BUILD_CONTEXT_DIR/"
+Smoke test:
+  $APPTAINER_BIN exec --nv --pwd /repo "$OUTPUT_PATH" uv run python -c 'import torch; print(torch.cuda.is_available())'
 
-cd "$BUILD_CONTEXT_DIR"
-if [ "$BUILD_FORMAT" = "sandbox" ]; then
-    "$APPTAINER_BIN" build --sandbox "${BUILD_ARGS[@]}" "$IMAGE_NAME" Apptainer.def
-else
-    "$APPTAINER_BIN" build "${BUILD_ARGS[@]}" "$IMAGE_NAME" Apptainer.def
-fi
-mv "$IMAGE_NAME" "$FINAL_IMAGE_PATH"
-
-echo "=== Done ==="
-echo "Image created: $FINAL_IMAGE_PATH"
-echo ""
-echo "Example usage:"
-echo "  $APPTAINER_BIN exec --nv $FINAL_IMAGE_PATH bash -c 'uv run python -m alpasim_controller.server'"
+Run a simulation:
+  uv run alpasim_wizard deploy=local_apptainer topology=1gpu driver=vavam \\
+    wizard.log_dir=\$PWD/out
+EOF

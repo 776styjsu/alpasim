@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2025-2026 NVIDIA Corporation
 
+import hashlib
 import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 import sys
 import uuid
@@ -98,6 +100,56 @@ def image_url_to_sqsh_filename(image: str, squash_caches: list[str]) -> str:
             return sqsh_path
 
     raise ValueError(f"Could not find file: {sqsh_fname} at {sqsh_paths=}.")
+
+
+def image_to_apptainer_basename(image: str) -> str:
+    """Name a cached image using its full reference, including registry and tag."""
+    reference = image.removeprefix("docker://")
+    name = re.sub(r"[^a-zA-Z0-9._-]", "_", reference.rsplit("/", 1)[-1])[:80]
+    digest = hashlib.sha256(reference.encode()).hexdigest()[:16]
+    return f"{name}-{digest}.sif"
+
+
+def resolve_apptainer_image(
+    image: str,
+    image_caches: list[str],
+    registry_fallback: bool = True,
+) -> str:
+    """Accept local images and native URIs, with optional OCI cache lookup.
+
+    Explicit URIs are passed through. registry_fallback controls only implicit
+    pulls of bare OCI references. Missing local paths always fail immediately.
+    """
+    if "://" not in image:
+        path = Path(image).expanduser()
+        if path.is_file() or path.is_dir():
+            return str(path.resolve())
+        if image.startswith(("/", "./", "../", "~")) or path.suffix in (
+            ".sif",
+            ".sandbox",
+        ):
+            raise FileNotFoundError(f"Apptainer image does not exist: {image}")
+    if "://" in image and not image.startswith("docker://"):
+        return image
+
+    stem = Path(image_to_apptainer_basename(image)).stem
+    candidates = [
+        Path(cache).expanduser() / f"{stem}{suffix}"
+        for cache in image_caches
+        for suffix in (".sif", ".sandbox")
+    ]
+    for candidate in candidates:
+        if candidate.is_file() or candidate.is_dir():
+            return str(candidate.resolve())
+    if image.startswith("docker://"):
+        return image
+    if registry_fallback:
+        return f"docker://{image}"
+    raise ValueError(
+        f"No cached Apptainer image for {image!r}; searched {candidates}. "
+        "Set services.<name>.image to a local SIF or sandbox, or prepare one "
+        f"with ./build_apptainer.sh --from-registry {shlex.quote(image)}."
+    )
 
 
 def _image_to_enroot_uri(image: str) -> str:
@@ -203,40 +255,6 @@ def ensure_sqsh_path(
 
         os.chmod(sqsh_path, 0o644)
         return os.path.abspath(sqsh_path)
-
-
-def image_url_to_sif_filename(image: str, sif_caches: list[str]) -> str:
-    """Converts a docker image URL to a canonical SIF filename used for Apptainer caches."""
-    sif_fname = os.path.basename(image).replace(":", "_").replace("-", "_") + ".sif"
-    sif_paths = [os.path.join(sif_cache, sif_fname) for sif_cache in sif_caches]
-
-    for sif_path in sif_paths:
-        if os.path.isfile(sif_path):
-            return sif_path
-
-    raise ValueError(f"Could not find file: {sif_fname} at {sif_paths=}.")
-
-
-def image_url_to_apptainer_image(image: str, apptainer_caches: list[str]) -> str:
-    """Resolve an Apptainer image from cache, supporting both .sif files and sandbox directories."""
-    image_stem = os.path.basename(image).replace(":", "_").replace("-", "_")
-    candidate_paths: list[str] = []
-    for cache_dir in apptainer_caches:
-        candidate_paths.extend(
-            [
-                os.path.join(cache_dir, f"{image_stem}.sif"),
-                os.path.join(cache_dir, f"{image_stem}.sandbox"),
-                os.path.join(cache_dir, image_stem),
-            ]
-        )
-
-    for candidate_path in candidate_paths:
-        if os.path.isfile(candidate_path) or os.path.isdir(candidate_path):
-            return candidate_path
-
-    raise ValueError(
-        f"Could not find Apptainer image for {image!r} in {apptainer_caches=!r}."
-    )
 
 
 def _process_config_values_for_saving(node: Any) -> Any:

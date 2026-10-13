@@ -113,9 +113,7 @@ def test_adapter_derives_per_rollout_session_seeds_from_spec_seed() -> None:
 
 def test_adapter_leaves_session_seed_unset_when_spec_has_no_seed() -> None:
     req = runtime_pb2.SimulationRequest(
-        rollout_specs=[
-            runtime_pb2.RolloutSpec(scenario_id="clipgt-a", nr_rollouts=2)
-        ]
+        rollout_specs=[runtime_pb2.RolloutSpec(scenario_id="clipgt-a", nr_rollouts=2)]
     )
 
     jobs = build_pending_jobs_from_request(req, "req-1", lambda _scene_id: True)

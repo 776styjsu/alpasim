@@ -102,6 +102,52 @@ class WizardPrometheusConfig:
 
 
 @dataclass
+class WizardApptainerConfig:
+    """Settings for the Apptainer deployment (`run_method: APPTAINER`).
+
+    Apptainer runs containers unprivileged as the calling user, which makes it
+    the usual choice on HPC clusters where Docker is unavailable. Defaults here
+    are deliberately site-neutral: everything that depends on a particular
+    cluster (module names, image caches, overlay policy) is opt-in.
+    """
+
+    # Optional caches populated by build_apptainer.sh. Filenames include a
+    # digest of the full image reference to avoid registry/name collisions.
+    image_caches: list[str] = field(default_factory=list)
+
+    # When no cached image matches, run `docker://<image>` so Apptainer pulls and
+    # converts it on the fly. Set to false on clusters without outbound network
+    # access, so a missing image fails immediately with the paths searched.
+    registry_fallback: bool = True
+
+    # Apptainer executable. Set an absolute path when it is not on PATH; on
+    # clusters using environment modules, `module load apptainer` in the job
+    # script before starting the wizard works too.
+    binary: str = "apptainer"
+
+    # Keep module/host variables out; service environments are passed explicitly.
+    cleanenv: bool = True
+
+    # Extra arguments added to every `apptainer exec`, e.g. ["--containall"].
+    extra_exec_args: list[str] = field(default_factory=list)
+
+    # Explicit additions to the image environment. Bare names pass host values.
+    environments: list[str] = field(
+        default_factory=lambda: ["PYTHONDONTWRITEBYTECODE=1"]
+    )
+
+    # Working directory for services built from an alpasim image that do not set
+    # `workdir` themselves. Apptainer ignores the image's WORKDIR, so it has to
+    # be passed explicitly. Services with `external_image` run from `/` instead,
+    # unless their own service config sets `workdir`.
+    workdir: str = "/repo"
+
+    # Give containers a writable in-memory layer so processes can write outside
+    # bind mounts. Disable on systems where Apptainer cannot set up overlays.
+    writable_tmpfs: bool = True
+
+
+@dataclass
 class WizardConfig:
     # Name of the run, used to identify the run in the databases.
     run_name: str | None = None
@@ -135,7 +181,9 @@ class WizardConfig:
     vscode: str = MISSING
 
     sqshcaches: list[str] = MISSING
-    sif_caches: list[str] = field(default_factory=list)
+
+    # Settings for run_method: APPTAINER. Ignored by the other run methods.
+    apptainer: WizardApptainerConfig = field(default_factory=WizardApptainerConfig)
 
     slurm_job_id: int | None = MISSING
     timeout: int = MISSING
@@ -190,6 +238,8 @@ class ContainerConfig:
     environments: list[str] = field(default_factory=list)
     workdir: str | None = None
     remap_root: bool = False
+    # Optional per-container ext3 scratch for Apptainer, in MiB.
+    apptainer_overlay_size_mb: int | None = None
 
 
 @dataclass
