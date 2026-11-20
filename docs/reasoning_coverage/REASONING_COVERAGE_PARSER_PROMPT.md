@@ -21,16 +21,19 @@ exactly one JSON object.
    stated. No commitment on an axis means no decision entry for that axis.
    Never manufacture `lane_keeping` to accompany longitudinal control, or speed
    tracking to accompany lateral control.
-4. Decision family and modifiers must be supported by text. Include each
-   modifier required by the recognized family; use JSON null and empty evidence
-   for a modifier whose value is unstated, ambiguous, or outside its enum.
-   Preserve the incomplete decision and any supported paths to it. Never guess
-   direction, purpose, turn kind, or intended maneuver to complete a variant.
+4. The decision family must be supported by text. Assign every modifier required
+   by that family a declared enum value. Use `unspecified` with empty evidence
+   when no supported specific value can be assigned because the detail is
+   unstated, ambiguous, or outside its enum. Never use null for a modifier.
+   Preserve the decision and its supported paths; never guess direction, extent,
+   purpose, turn kind, intended maneuver, or canceled maneuver. `unspecified`
+   cannot substitute for an unidentified decision family or an absent decision.
 5. Proposition fields are sparse: include only supported enum or Boolean
-   assignments. Omit unstated fields. Do not emit `none`, `unknown`, or null as
-   a proposition field value. Explicit false is a substantive value; omission
-   does not imply false. Negative statements about an enum do not select an
-   alternative: "not red" does not establish green or yellow.
+   assignments. Omit unstated fields. Do not emit `none`, `unknown`,
+   `unspecified`, or null as a proposition field value. Explicit false is a
+   substantive value; omission does not imply false. Negative statements about
+   an enum do not select an alternative: "not red" does not establish green or
+   yellow.
 6. Keep each proposition within one family and one entity or scene element.
    Assign entity IDs in order of first mention. Reuse an entity ID only for
    unambiguous references to the same entity. Do not combine one actor's position
@@ -59,9 +62,10 @@ exactly one JSON object.
     names and enum values. If stated fields appear structurally inconsistent,
     preserve the encodable assignments and record a schema-conflict diagnostic
     for later review; do not silently repair them.
-12. Every non-null modifier, proposition field, decision family, and path must
-    have evidence copied exactly from the input reasoning string. Use short
-    contiguous substrings; an evidence array can contain several substrings.
+12. Every modifier other than `unspecified`, every proposition field, every
+    decision family, and every path must have evidence copied exactly from the
+    input reasoning string. Use short contiguous substrings; an evidence array
+    can contain several substrings.
     A path's evidence must support the relationship, not merely list its two
     endpoints. Evidence establishes textual support, not real-world truth.
 13. Do not force out-of-schema concepts into nearby categories. Preserve them
@@ -71,15 +75,15 @@ exactly one JSON object.
 ## Z1: decision vocabulary
 
 Only these families and modifier values are allowed. Braces list required
-modifier keys. Families with `{}` have no modifiers. Enum values exclude null;
-null is permitted only to record an unresolved required modifier.
+modifier keys. Families with `{}` have no modifiers. Every modifier must have
+one enum value, including `unspecified` where necessary.
 
 Longitudinal:
 
-- `set_speed_tracking`: {mode: maintain | reach}
+- `set_speed_tracking`: {mode: maintain | reach | unspecified}
 - `lead_following`: {}
 - `speed_adaptation`: {}
-- `gap_searching`: {intended_maneuver: lane_change | merge | zipper}
+- `gap_searching`: {intended_maneuver: lane_change | merge | zipper | unspecified}
 - `passing_acceleration`: {}
 - `yield`: {}
 - `stop_for_static_constraint`: {}
@@ -87,26 +91,36 @@ Longitudinal:
 Lateral:
 
 - `lane_keeping`: {}
-- `merge`: {direction: left | right}
-- `split`: {direction: left | right}
-- `out_of_lane_nudge`: {direction: left | right}
-- `in_lane_nudge`: {direction: left | right}
-- `lane_change`: {direction: left | right}
-- `pull_over`: {direction: left | right, purpose: pickup | emergency_stop | parking_approach}
-- `turn`: {kind: intersection | roundabout | u_turn, direction: left | right}
-- `lateral_maneuver_abort`: {canceled_maneuver: nudge | lane_change | merge | split | pull_over, canceled_direction: left | right}
+- `merge`: {direction: left | right | unspecified}
+- `split`: {direction: left | right | unspecified}
+- `nudge`: {direction: left | right | unspecified, extent: in_lane | out_of_lane | unspecified}
+- `lane_change`: {direction: left | right | unspecified}
+- `pull_over`: {direction: left | right | unspecified, purpose: pickup | emergency_stop | parking_approach | unspecified}
+- `turn`: {kind: intersection | roundabout | u_turn | unspecified, direction: left | right | unspecified}
+- `lateral_maneuver_abort`: {canceled_maneuver: nudge | lane_change | merge | split | pull_over | unspecified, canceled_direction: left | right | unspecified}
 
 Interpret speed tracking as maintaining or reaching a stated target speed;
 lead following as regulating motion to follow a lead actor; speed adaptation
 as adapting speed to stated road/environment conditions; gap searching as
-adjusting longitudinal motion to find or create a gap for a named maneuver; passing
+adjusting longitudinal motion to find or create a gap, using
+`intended_maneuver=unspecified` when the maneuver is not identified; passing
 acceleration as acceleration for passing; yield as giving way or waiting for a
 conflict to clear; and stop for static constraint as stopping for a fixed
 constraint/control. Do not classify generic "accelerate" as passing acceleration
 without passing intent, or generic "slow down" as lead following without a lead
 relationship. Record an ambiguous decision family when no unique mapping is
-supported. Distinguish a full lane change from a nudge; a nudge's in/out-of-lane
-subtype must be supported. "Turn left" alone leaves `kind` null.
+supported. Distinguish a full lane change from a nudge. Assign `extent=in_lane`
+only when staying within the lane is supported, and `extent=out_of_lane` only
+when crossing the lane boundary is supported. Movement size alone does not
+establish either extent. "Nudge left" alone gives `direction=left,
+extent=unspecified`; "Turn left" alone gives `direction=left, kind=unspecified`.
+
+For flat decision-variant and decision-linked path coverage, `unspecified` is
+a declared category and counts like any other modifier value. A decision with
+all required keys assigned is complete under this schema even when some values
+are `unspecified`. Specified and unspecified variants are distinct coverage
+items; neither automatically covers the other. An absent decision contributes
+no item. Z3 remains sparse: omitted fields contribute no proposition coverage.
 
 ## Z2: relation vocabulary
 
@@ -116,10 +130,15 @@ subtype must be supported. "Turn left" alone leaves `kind` null.
 - `blocks`: the proposition is presented as preventing or delaying the target
   maneuver. The target is the prevented maneuver, not automatically its alternative.
 - `constrains`: the proposition limits how, when, or to what extent the target
-  maneuver may occur while it remains possible.
+  maneuver can occur.
 
 Choose the role supported by the wording. A specific enabling, blocking, or
 limiting statement does not automatically earn an additional `motivates` link.
+Roles describe relationships, not proposition content: a clear lane or an
+available gap is not automatically `enables`, and a red signal is not
+automatically `blocks`. The wording must link that proposition to that decision
+in the stated role. Use `blocks` when the maneuver is prevented or delayed;
+use `constrains` when the text limits its execution, such as its speed or extent.
 Emit multiple roles for one proposition–decision pair only when the text supports
 each relationship. If the role cannot be resolved, retain the endpoints and
 record `ambiguous_relation` without inventing a path. A negated relationship
@@ -133,7 +152,7 @@ an empty fields object and still participate in an extracted path; it produces
 no one-field or two-field proposition coverage.
 
 - `critical_object`:
-  - type: vehicle | pedestrian | cyclist | other_vru
+  - type: vehicle | pedestrian | cyclist | other_vru | static_obstacle
   - relative_position: left | right
   - in_path: bool
   - at_crosswalk: bool
@@ -152,6 +171,8 @@ no one-field or two-field proposition coverage.
   - control_scope: all_way | two_way
   - line_type: stop | yield
   - line_location: ahead | at_ego | behind
+  - human_control_present: bool
+  - instruction: stop | yield | proceed | slow
 - `road_event`:
   - type: curve | grade | speed_bump | narrowing | roundabout | ramp | junction
   - curve_direction: left | right
@@ -163,6 +184,7 @@ no one-field or two-field proposition coverage.
   - shoulder_present: bool
   - bike_lane_present: bool
   - usable_width_m: insufficient | tight | adequate
+  - clear: bool
 - `route_intent`:
   - target_lane: current | adjacent_left | adjacent_right | farther_left | farther_right
   - movement: left_turn | right_turn | through
@@ -176,22 +198,44 @@ no one-field or two-field proposition coverage.
   - rule_source: emergency_vehicle | school_bus | rail_crossing
   - required_action: stop | yield | pull_over
   - prohibited_action: pass | proceed
+- `traffic_state`:
+  - lead_vehicle_present: bool
+  - conflicting_traffic_present: bool
+  - gap_available: bool
+  - flow: stopped | slow | moving
 
 Do not infer `route_intent` from every selected turn or lane change. It must
 describe a route goal or requirement. Likewise, `required_action` and
 `prohibited_action` describe a stated constraint, not merely the selected action.
 The name `usable_width_m` denotes the categorical values above, not a numeric
 measurement; do not invent numeric thresholds for converting widths to bins.
-This schema has no gap-availability field, no explicit static-obstacle object
-type, and no `proceed` decision family. Report such concepts as out of schema
-when no other declared family accurately represents the text. Never introduce
-new enum values to conceal these limitations.
+Use `traffic_control.human_control_present` for stated human traffic control
+and `instruction` for a stated control instruction. A flagger's presence does
+not establish a stop instruction; an ego decision to stop does not establish
+that the flagger commanded it. Keep separately stated construction facts in
+`odd_constraint`. There is no `proceed` decision family: a control instruction
+to proceed is representable, but generic ego "proceed" needs a diagnostic when
+no declared decision family accurately represents it.
+
+Use `lane_space.clear` for stated lane clearance, without inferring usable
+width, absence of a lead vehicle, or gap availability. Use `traffic_state` for
+stated lead-vehicle presence/absence, conflicting-traffic presence/absence, gap
+availability, and traffic flow. A stated lead vehicle supports
+`lead_vehicle_present=true`; retain its object attributes separately in
+`critical_object`. A statement of absence does not create a critical object.
+When one entity supports propositions in different families, keep separate
+proposition instances, reuse its entity ID, and link each only as supported.
+`traffic_state.flow` describes traffic flow, while `critical_object.motion`
+describes an individual actor; "moving slowly" does not imply deceleration.
+Creating or searching for a gap does not assert that one is currently available
+or unavailable. Preserve conditions when gap availability is hypothetical.
+Never introduce new fields or enum values to conceal remaining schema limits.
 
 ## JSON output contract
 
 Return these exact top-level keys:
 
-- `schema_version`: always "decision-role-proposition-v1"
+- `schema_version`: always "decision-role-proposition-v2"
 - `trace_id`: copied from input
 - `decisions`: array of decision objects
 - `propositions`: array of proposition objects
@@ -204,7 +248,8 @@ Each decision object has exactly:
 - `channel`: "longitudinal" or "lateral"
 - `family`: one of that channel's decision families
 - `modifiers`: object with exactly the keys declared for this family; each value
-  is an object {"value": enum string or null, "evidence": array of exact quotes}
+  is an object {"value": enum string, "evidence": array of exact quotes}.
+  Use empty evidence for `unspecified` and nonempty evidence for other values.
 - `status`: "selected", "candidate", "blocked", "rejected", "aborted", or "unspecified"
 - `timing`: "immediate", "continuation", "conditional", or "unspecified"
 - `condition`: exact condition substring or null
@@ -214,7 +259,7 @@ Each proposition object has exactly:
 
 - `id`: p1, p2, ... in first-mention order
 - `entity_id`: e1, e2, ... identifying the described entity or scene element
-- `family`: one of the seven proposition families
+- `family`: one of the eight proposition families
 - `fields`: object containing only supported field keys from that family; each
   value is {"value": enum string or Boolean, "evidence": nonempty array of exact quotes}
 - `assertion`: "asserted", "conditional", or "uncertain"; this describes the
@@ -236,9 +281,11 @@ Each diagnostic object has exactly:
 - `evidence`: nonempty array of exact quotes
 - `detail`: one short description of the unresolved extraction issue
 
-Do not add confidence scores or explanatory reasoning. Missing modifiers alone
-need no diagnostic: their null values already record incompleteness. Empty
-arrays are valid. If nothing is extractable, return all four arrays empty
+Do not add confidence scores or explanatory reasoning. Unstated modifiers alone
+need no diagnostic: `unspecified` already records the missing detail. For an
+ambiguous or out-of-enum modifier, also record `ambiguous_field` or
+`out_of_schema` with the relevant evidence. Empty arrays are valid. If nothing
+is extractable, return all four arrays empty
 unless the trace contains an extraction issue worth recording.
 
 ## Benchmark examples
@@ -252,13 +299,13 @@ without paraphrasing or changing punctuation. Outputs are illustrative manual
 parses of the text, not benchmark ground-truth parsing annotations. Only the
 reasoning text and identifiers were used to construct them.
 
-### Example 1: One control axis; three stated proposition fields
+### Example 1: One control axis; object attributes and lead presence
 
 Input:
 
 ```json
 {
-  "trace_id": "clipgt-id_time",
+  "trace_id": "clipgt-example-1_time",
   "reasoning": "Keep distance to the lead vehicle since it is stopped ahead in our lane"
 }
 ```
@@ -267,7 +314,7 @@ Output:
 
 ```json
 {
-  "schema_version": "decision-role-proposition-v1",
+  "schema_version": "decision-role-proposition-v2",
   "trace_id": "clipgt-example-1_time",
   "decisions": [
     {
@@ -314,11 +361,37 @@ Output:
         "the lead vehicle",
         "it is stopped ahead in our lane"
       ]
+    },
+    {
+      "id": "p2",
+      "entity_id": "e1",
+      "family": "traffic_state",
+      "fields": {
+        "lead_vehicle_present": {
+          "value": true,
+          "evidence": [
+            "the lead vehicle"
+          ]
+        }
+      },
+      "assertion": "asserted",
+      "condition": null,
+      "evidence": [
+        "the lead vehicle"
+      ]
     }
   ],
   "paths": [
     {
       "proposition_id": "p1",
+      "role": "motivates",
+      "decision_id": "d1",
+      "evidence": [
+        "Keep distance to the lead vehicle since it is stopped ahead in our lane"
+      ]
+    },
+    {
+      "proposition_id": "p2",
       "role": "motivates",
       "decision_id": "d1",
       "evidence": [
@@ -330,9 +403,12 @@ Output:
 }
 ```
 
-The lead-following decision needs no lateral commitment. The three stated
-fields produce six coverage≤2 items for this one link. No relative-position
-value is emitted: the enum has left/right, not ahead.
+The lead-following decision needs no lateral commitment. The three object
+fields produce six coverage≤2 items, and lead presence produces one more
+through its separate link, for seven total. The two propositions describe the
+same lead vehicle and share an entity ID; do not combine fields across families
+for a projection. No relative-position value is emitted: the enum has
+left/right, not ahead.
 
 ### Example 2: Gap creation and a blocked right lane change
 
@@ -349,7 +425,7 @@ Output:
 
 ```json
 {
-  "schema_version": "decision-role-proposition-v1",
+  "schema_version": "decision-role-proposition-v2",
   "trace_id": "clipgt-example-2_time",
   "decisions": [
     {
@@ -466,7 +542,7 @@ Output:
 
 ```json
 {
-  "schema_version": "decision-role-proposition-v1",
+  "schema_version": "decision-role-proposition-v2",
   "trace_id": "clipgt-example-3_time",
   "decisions": [
     {
@@ -536,7 +612,7 @@ Output:
 
 ```json
 {
-  "schema_version": "decision-role-proposition-v1",
+  "schema_version": "decision-role-proposition-v2",
   "trace_id": "clipgt-example-4_time",
   "decisions": [
     {
@@ -545,7 +621,7 @@ Output:
       "family": "turn",
       "modifiers": {
         "kind": {
-          "value": null,
+          "value": "unspecified",
           "evidence": []
         },
         "direction": {
@@ -606,9 +682,10 @@ Output:
 ```
 
 Rightward direction is stated, but intersection/roundabout/U-turn kind is not.
-Preserve the path with `kind=null`; it earns no fully specified decision-linked
-coverage. The sign has an encodable presence field, while its unsupported type
-is retained in a diagnostic. Do not infer an intersection or a route goal.
+Preserve the path with `kind=unspecified`; this is a complete declared decision
+variant and earns one decision-linked coverage item from `sign_present=true`.
+The unsupported sign type is retained in a diagnostic. Do not infer an
+intersection or a route goal.
 
 ### Example 5: Separate immediate and continuation decisions
 
@@ -625,7 +702,7 @@ Output:
 
 ```json
 {
-  "schema_version": "decision-role-proposition-v1",
+  "schema_version": "decision-role-proposition-v2",
   "trace_id": "clipgt-example-5_time",
   "decisions": [
     {
@@ -730,26 +807,30 @@ explicit immediate-only or continuation-inclusive coverage policy.
 
 > Keep lane since the lane is clear ahead
 
-Extract `lane_keeping` and the stated `lane_space` proposition, but leave
-its fields empty: lane clearance is not a lane-count, boundary, or width value.
-The stated motivates link is representable but has no proposition projection;
-record lane clearance as out of schema.
+Extract `lane_keeping` and `lane_space(clear=true)` with a `motivates` link.
+This gives one decision-linked coverage item. Do not infer a width category,
+lead-vehicle absence, or an additional `enables` link from lane clearance.
 
 
 > Keep lane since the lane is clear and no lead vehicle is present
 
-Do not turn "no lead vehicle" into an assertion that a vehicle exists.
-The object schema lacks a presence field, so preserve this absence in an
-`unrepresented_negation` diagnostic. Lane clearance likewise has no matching
-field. Do not invent `in_path=false` for an unspecified actor.
+Extract `lane_keeping`, `lane_space(clear=true)`, and
+`traffic_state(lead_vehicle_present=false)`. The two coordinated reasons each
+have a `motivates` link to lane keeping, giving two coverage≤2 items. Keep the
+lane and traffic state as separate scene elements. Do not create a vehicle
+object or invent `in_path=false`; the stated absence is directly representable
+and needs no negation diagnostic.
 
 
 > Nudge left due to the stopped vehicle blocking the right side of our lane
 
-The nudge direction is left, but whether it crosses a lane boundary is
-unstated. Do not choose `in_lane_nudge` or `out_of_lane_nudge` by guessing; record
-`ambiguous_decision`. Preserve the stopped vehicle and its stated right-side
-position, without inventing a lane-change path.
+Extract `nudge(direction=left, extent=unspecified)` with empty evidence for
+`extent`. Do not default to an in-lane nudge or use movement size to infer a
+boundary crossing. Extract `critical_object(type=vehicle, motion=stopped,
+relative_position=right)` and its `motivates` link to the nudge. These three
+fields give six coverage≤2 items even though extent is unspecified. Blocking
+the right side motivates the left nudge; it does not state that the nudge
+itself is blocked. Do not infer `in_path=true` solely from the side obstruction.
 
 
 > Accelerate to the speed limit since a 60 km/h speed limit sign is posted ahead
@@ -763,9 +844,98 @@ field and motivates link; record the unsupported sign type/value separately.
 > Keep distance to the lead vehicle since it is moving slowly ahead
 
 "Moving slowly" does not assert `motion=slowing` or `motion=stopped`.
-The lead-following path can use the stated vehicle type without those values.
-"Ahead" alone does not assert `in_path=true`.
+The lead-following paths can use `critical_object(type=vehicle)` and a separate
+`traffic_state(lead_vehicle_present=true)` proposition referring to the same
+lead vehicle. "Ahead" alone does not assert `in_path=true`. This individual
+actor description does not establish a scene-level traffic-flow value.
 
-Before returning, check vocabulary membership, null/omission rules, entity
-separation, exact evidence substrings, endpoint references, and duplicate paths.
+## Additional illustrative boundary examples
+
+The following examples are constructed to clarify the schema; they are not
+quoted benchmark traces. In the shorthand below, `status` and `timing` are
+decision metadata, not modifiers.
+
+> Nudge right within our lane because a static barrier blocks the left side
+
+Extract `nudge(direction=right, extent=in_lane)` and
+`critical_object(type=static_obstacle, relative_position=left)` with a
+`motivates` link. The explicit lane-boundary wording supports the extent.
+A stopped vehicle still has `type=vehicle`; being stationary alone does not
+make an actor a `static_obstacle`.
+
+> Nudge left across the lane boundary to avoid the static barrier on the right
+
+Extract `nudge(direction=left, extent=out_of_lane)` and
+`critical_object(type=static_obstacle, relative_position=right)` with a
+`motivates` link. The stated nudge crosses the boundary; do not reclassify it
+as a full lane change solely because of that crossing.
+
+> Stop because the construction flagger is instructing us to stop
+
+Extract `stop_for_static_constraint` and
+`traffic_control(human_control_present=true, instruction=stop)` with a
+`motivates` link. Retain the stated construction fact separately as
+`odd_constraint(construction_present=true)`; construction alone is not stated
+as the reason for stopping, so do not automatically add a second link.
+Do not infer `sign_present=true` from a human instruction.
+
+> Stop for the flagger controlling traffic ahead
+
+Extract `stop_for_static_constraint` and
+`traffic_control(human_control_present=true)` with a `motivates` link. Omit
+`instruction`: the selected stop does not prove the flagger ordered a stop.
+
+> The available gap allows a right lane change
+
+Extract `traffic_state(gap_available=true)` and
+`lane_change(direction=right, status=candidate)` with an `enables` link.
+Possibility alone does not establish selection. Do not infer lane clearance
+or absence of conflicting traffic from gap availability.
+
+> No gap is available, preventing a right lane change
+
+Extract `traffic_state(gap_available=false)` and
+`lane_change(direction=right, status=blocked)` with a `blocks` link. The explicit
+false value earns coverage. Do not infer a selected gap-searching action or an
+abort from a blocked maneuver alone.
+
+> If a gap becomes available, change lanes to the left
+
+Extract conditional `traffic_state(gap_available=true)` and
+`lane_change(direction=left, status=selected, timing=conditional)` with an
+`enables` link. Use `If a gap becomes available` as the condition on both
+objects. This does not assert a currently available gap.
+
+> Conflicting traffic is present, so yield
+
+Extract `traffic_state(conflicting_traffic_present=true)` and `yield` with a
+`motivates` link. Do not invent a specific actor type or position.
+
+> Traffic flow is slow, limiting how fast we can merge right
+
+Extract `traffic_state(flow=slow)` and
+`merge(direction=right, status=candidate)` with a `constrains` link. The text
+limits execution speed; it does not say the merge is prevented or selected.
+Do not infer that an individual vehicle is slowing.
+
+> Abort the lane change because the lane is not clear
+
+Extract `lane_change(direction=unspecified, status=aborted)` and
+`lateral_maneuver_abort(canceled_maneuver=lane_change,
+canceled_direction=unspecified, status=selected)`. Extract
+`lane_space(clear=false)` with a `motivates` link to the abort decision. Do not
+automatically add a `blocks` link to the aborted lane change: the reason for
+cancellation does not explicitly assert that execution was impossible.
+
+> Pull over because an emergency vehicle requires us to pull over
+
+Extract `pull_over(direction=unspecified, purpose=unspecified)` and
+`odd_constraint(emergency_vehicle_present=true, rule_source=emergency_vehicle,
+required_action=pull_over)` with a `motivates` link. An emergency vehicle's
+presence does not by itself establish an ego `emergency_stop` purpose. Retain
+the stated `critical_object(type=vehicle)` separately for the same entity.
+
+Before returning, check vocabulary membership, required modifier assignments,
+`unspecified`/omission rules, entity separation, exact evidence substrings,
+endpoint references, and duplicate paths.
 Do not include this check or its reasoning in the output.
