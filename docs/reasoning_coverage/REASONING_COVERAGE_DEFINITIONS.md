@@ -292,19 +292,19 @@ the evaluation.
 ## Implementation and reports
 
 The closed Table vocabulary is in
-[`alpamayo_tables.py`](../src/tools/reasoning_coverage/alpamayo_tables.py). The
+[`alpamayo_tables.py`](../../src/tools/reasoning_coverage/alpamayo_tables.py). The
 compiler and item construction are in
-[`table_program.py`](../src/tools/reasoning_coverage/table_program.py).
+[`table_program.py`](../../src/tools/reasoning_coverage/table_program.py).
 Trajectory-grid construction is in
-[`trajectory_grid.py`](../src/tools/reasoning_coverage/trajectory_grid.py).
+[`trajectory_grid.py`](../../src/tools/reasoning_coverage/trajectory_grid.py).
 
 Entry points are `reasoning_coverage.table_evaluation` and
 `reasoning_coverage.planned_safety_evaluation`. Commands for reading archived
 inputs and writing fresh output are in the
-[archive index](archive/reasoning_coverage/2026-09-06/README.md).
+[archive index](../archive/reasoning_coverage/2026-09-06/README.md).
 
 Detailed cohort counts, empirical comparisons, and original report paths are
-preserved in the [historical definitions report](archive/reasoning_coverage/2026-09-06/REASONING_COVERAGE_DEFINITIONS.md).
+preserved in the [historical definitions report](../archive/reasoning_coverage/2026-09-06/REASONING_COVERAGE_DEFINITIONS.md).
 
 ## Known limitations
 

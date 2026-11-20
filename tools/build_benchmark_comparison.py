@@ -28,20 +28,20 @@ def first_existing(*paths: Path) -> Path:
 def resolve_paths(dataset: str, output: str | None) -> dict[str, Path]:
     return {
         "dataset": dataset,
-        "gt": first_existing(ROOT / f"{dataset}.json", ROOT / "archive" / f"{dataset}.json"),
+        "gt": first_existing(ROOT / f"{dataset}.json", ROOT / "experiments" / "archive" / f"{dataset}.json"),
         "llm_plain": first_existing(
             ROOT / f"{dataset}.cot_consistency.json",
-            ROOT / "archive" / f"{dataset}.cot_consistency.json",
+            ROOT / "experiments" / "archive" / f"{dataset}.cot_consistency.json",
         ),
         "llm_lane": first_existing(
             ROOT / f"{dataset}.cot_consistency_lane_center.json",
-            ROOT / "archive" / f"{dataset}.cot_consistency_lane_center.json",
+            ROOT / "experiments" / "archive" / f"{dataset}.cot_consistency_lane_center.json",
         ),
         "rule": first_existing(
             ROOT / f"{dataset}.rule_consistency.json",
-            ROOT / "archive" / f"{dataset}.rule_consistency.json",
+            ROOT / "experiments" / "archive" / f"{dataset}.rule_consistency.json",
         ),
-        "out": Path(output) if output else ROOT / f"{dataset}.comparison.html",
+        "out": Path(output) if output else ROOT / "experiments" / "results" / f"{dataset}.comparison.html",
     }
 
 
@@ -522,7 +522,7 @@ def parse_args():
     )
     parser.add_argument(
         "--output",
-        help="Output HTML path. Defaults to <dataset>.comparison.html in the repo root.",
+        help="Output HTML path. Defaults to experiments/results/<dataset>.comparison.html.",
     )
     return parser.parse_args()
 

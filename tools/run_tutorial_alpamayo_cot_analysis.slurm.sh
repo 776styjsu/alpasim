@@ -6,8 +6,8 @@
 #SBATCH --partition=standard   # partition
 #SBATCH -J "cot-analysis"   # job name
 #SBATCH --account=elbaumhpc   # allocation name
-#SBATCH --output=slurm_output/cot_alpamayo_%A_%a.out
-#SBATCH --error=slurm_output/cot_alpamayo_%A_%a.err
+#SBATCH --output=experiments/logs/cot_alpamayo_%A_%a.out
+#SBATCH --error=experiments/logs/cot_alpamayo_%A_%a.err
 
 set -euo pipefail
 
@@ -27,7 +27,7 @@ NO_IMAGES="${NO_IMAGES:-0}"
 # Example: sbatch --array=0-9 --export=ALL,SCENES_PER_TASK=5 ...
 SCENES_PER_TASK="${SCENES_PER_TASK:-0}"
 
-mkdir -p "$REPO_ROOT/slurm_output"
+mkdir -p "$REPO_ROOT/experiments/logs"
 cd "$REPO_ROOT"
 
 # source setup_local_env.sh

@@ -21,8 +21,8 @@
 #SBATCH --mem=64G
 #SBATCH -J "llm_matrix_update"
 #SBATCH --account=elbaumhpc
-#SBATCH --output=logs/llm_matrix_update_%A.out
-#SBATCH --error=logs/llm_matrix_update_%A.err
+#SBATCH --output=experiments/logs/llm_matrix_update_%A.out
+#SBATCH --error=experiments/logs/llm_matrix_update_%A.err
 
 set -euo pipefail
 
@@ -64,7 +64,7 @@ QWEN35_HOST="${QWEN35_HOST:-127.0.0.1}"
 QWEN35_PORT="${QWEN35_PORT:-8000}"
 QWEN35_READY_TIMEOUT_S="${QWEN35_READY_TIMEOUT_S:-900}"
 QWEN35_GPU_MEMORY_UTILIZATION="${QWEN35_GPU_MEMORY_UTILIZATION:-0.80}"
-QWEN35_SERVER_LOG="${QWEN35_SERVER_LOG:-logs/qwen35_llm_matrix_update_${SLURM_JOB_ID:-manual}.log}"
+QWEN35_SERVER_LOG="${QWEN35_SERVER_LOG:-experiments/logs/qwen35_llm_matrix_update_${SLURM_JOB_ID:-manual}.log}"
 
 # Space-separated module names. Leave empty if uv/vLLM can run from PATH.
 MODULES="${MODULES:-}"
@@ -119,7 +119,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$REPO_ROOT/logs"
+mkdir -p "$REPO_ROOT/experiments/logs"
 cd "$REPO_ROOT"
 
 load_cluster_modules

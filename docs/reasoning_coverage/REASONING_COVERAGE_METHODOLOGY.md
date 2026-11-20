@@ -2,7 +2,7 @@
 
 This reference collects methods used across previous reasoning-coverage
 experiments. Detailed results and original write-ups are in the
-[September 2026 archive](archive/reasoning_coverage/2026-09-06/README.md).
+[September 2026 archive](../archive/reasoning_coverage/2026-09-06/README.md).
 The new reasoning-coverage structure has not yet been defined.
 
 ## Representations and controls
@@ -68,6 +68,6 @@ establish that another representation cannot discover the fault.
 
 ## Reproduction
 
-The [archive index](archive/reasoning_coverage/2026-09-06/README.md) maps original
+The [archive index](../archive/reasoning_coverage/2026-09-06/README.md) maps original
 artifact paths to archived locations and provides commands that read archived
 inputs while writing fresh output under `experiments/results/`.

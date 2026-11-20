@@ -93,5 +93,5 @@ def main(src, dst, representative):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        sys.exit("usage: build_flat_tutorial.py <src_dir> <dst_dir> [representative_scene_name]")
+        sys.exit("usage: tools/build_flat_tutorial.py <src_dir> <dst_dir> [representative_scene_name]")
     main(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3] if len(sys.argv) > 3 else None)

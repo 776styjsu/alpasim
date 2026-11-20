@@ -2,10 +2,10 @@
 
 This archive preserves detailed results from experiments preceding the planned
 reasoning-coverage redesign. The active
-[methodology reference](../../../REASONING_COVERAGE_METHODOLOGY.md),
-[Table-based definitions](../../../REASONING_COVERAGE_DEFINITIONS.md),
-[pilot methodology](../../../REASONING_COVERAGE_PILOT.md), and
-[pre-Table definitions](../../../REASONING_COVERAGE_DEFINITIONS_DEPRECATED.md)
+[methodology reference](../../../reasoning_coverage/REASONING_COVERAGE_METHODOLOGY.md),
+[Table-based definitions](../../../reasoning_coverage/REASONING_COVERAGE_DEFINITIONS.md),
+[pilot methodology](../../../reasoning_coverage/REASONING_COVERAGE_PILOT.md), and
+[pre-Table definitions](../../../reasoning_coverage/REASONING_COVERAGE_DEFINITIONS_DEPRECATED.md)
 remain in `docs/`.
 
 ## Historical write-ups

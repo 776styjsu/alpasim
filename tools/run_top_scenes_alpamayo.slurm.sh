@@ -21,8 +21,8 @@
 #SBATCH --mem=16G
 #SBATCH -J "alpamayo_run"
 #SBATCH --account=elbaumhpc
-#SBATCH --output=logs/alpamayo_run_%A_%a.out
-#SBATCH --error=logs/alpamayo_run_%A_%a.err
+#SBATCH --output=experiments/logs/alpamayo_run_%A_%a.out
+#SBATCH --error=experiments/logs/alpamayo_run_%A_%a.err
 
 set -euo pipefail
 
@@ -82,7 +82,7 @@ is_non_negative_int() {
   [[ "$1" =~ ^[0-9]+$ ]]
 }
 
-mkdir -p "$REPO_ROOT/logs"
+mkdir -p "$REPO_ROOT/experiments/logs"
 cd "$REPO_ROOT"
 
 load_cluster_modules

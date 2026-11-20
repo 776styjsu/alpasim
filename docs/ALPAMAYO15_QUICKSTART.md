@@ -60,7 +60,7 @@ The simulation image, built from `Apptainer.def` with no Docker daemon:
 
 If your cluster forbids unprivileged builds (`--fakeroot` errors), convert a pre-built image
 instead: `./build_apptainer.sh --from-registry docker://<registry>/alpasim-base:<version>`, or
-`--from-archive` a `docker save` tarball. See [docs/APPTAINER.md](docs/APPTAINER.md).
+`--from-archive` a `docker save` tarball. See [docs/APPTAINER.md](APPTAINER.md).
 
 The renderer image comes from NGC, and pulls anonymously — no login, no API key:
 

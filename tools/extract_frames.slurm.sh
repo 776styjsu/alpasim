@@ -2,8 +2,8 @@
 #SBATCH --job-name=extract_frames
 #SBATCH --partition=standard
 #SBATCH --account=elbaumhpc
-#SBATCH --output=logs/extract_frames_%A_%a.out
-#SBATCH --error=logs/extract_frames_%A_%a.err
+#SBATCH --output=experiments/logs/extract_frames_%A_%a.out
+#SBATCH --error=experiments/logs/extract_frames_%A_%a.err
 #SBATCH --array=0-99
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
@@ -47,7 +47,7 @@ OUTPUT_DIR="${REPO_DIR}/${BATCH}/extracted_frames/${CLIP_NAME}"
 echo "[$(date)] Task ${SLURM_ARRAY_TASK_ID}/${TOTAL}: processing ${ASL}"
 echo "  Output: ${OUTPUT_DIR}"
 
-mkdir -p logs "${OUTPUT_DIR}"
+mkdir -p "${OUTPUT_DIR}"
 
 uv run --extra eval python -m alpasim_utils.extract_frame \
     "${ASL}" \

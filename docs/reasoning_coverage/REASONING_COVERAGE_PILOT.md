@@ -1,7 +1,7 @@
 # Alpamayo reasoning-coverage pilot methodology
 
 This document preserves the methodology of the initial retrospective pilot.
-The [complete pilot report](archive/reasoning_coverage/2026-09-06/REASONING_COVERAGE_PILOT.md)
+The [complete pilot report](../archive/reasoning_coverage/2026-09-06/REASONING_COVERAGE_PILOT.md)
 contains its results, diagnostics, and historical proposed follow-up. These
 methods document previous experiments; they do not lock the planned redesign.
 
@@ -76,7 +76,7 @@ The coarse audit sampled one case per observed decision pair. The program audit
 sampled unique texts across single/multi-step and resolved-decision strata.
 Balanced stress samples diagnose parser errors rather than estimate population
 accuracy. Codex-assisted labels require researcher review and are not ground
-truth. Audit records are in the [archive](archive/reasoning_coverage/2026-09-06/README.md).
+truth. Audit records are in the [archive](../archive/reasoning_coverage/2026-09-06/README.md).
 
 ## Per-plan safety proxy
 
@@ -155,7 +155,7 @@ conflict alone does not establish right-of-way or an obligation to yield; the
 ## Reproduction and prospective design
 
 Use the [pre-Table definitions](REASONING_COVERAGE_DEFINITIONS_DEPRECATED.md)
-for program arms and the [archive index](archive/reasoning_coverage/2026-09-06/README.md)
+for program arms and the [archive index](../archive/reasoning_coverage/2026-09-06/README.md)
 for historical commands and relocated inputs.
 
 For a new evaluation, freeze the schema, compiler, item weighting, quantile

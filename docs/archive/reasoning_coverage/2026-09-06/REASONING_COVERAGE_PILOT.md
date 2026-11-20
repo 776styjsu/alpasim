@@ -33,7 +33,7 @@ blinded human adjudication subset.
 
 ## Coverage arms
 
-See [Deprecated pre-Table reasoning-coverage definitions](../../../REASONING_COVERAGE_DEFINITIONS_DEPRECATED.md)
+See [Deprecated pre-Table reasoning-coverage definitions](../../../reasoning_coverage/REASONING_COVERAGE_DEFINITIONS_DEPRECATED.md)
 for the decomposition, denominator, and selection rule used by the original
 benchmark and OOD arms.
 

@@ -36,8 +36,8 @@
 #SBATCH --mem=24G
 #SBATCH -J "alpamayo_monitor_run"
 #SBATCH --account=elbaumhpc
-#SBATCH --output=logs/alpamayo_monitor_run_%A_%a.out
-#SBATCH --error=logs/alpamayo_monitor_run_%A_%a.err
+#SBATCH --output=experiments/logs/alpamayo_monitor_run_%A_%a.out
+#SBATCH --error=experiments/logs/alpamayo_monitor_run_%A_%a.err
 
 set -euo pipefail
 
@@ -123,7 +123,7 @@ is_non_negative_int() {
   [[ "$1" =~ ^[0-9]+$ ]]
 }
 
-mkdir -p "$REPO_ROOT/logs"
+mkdir -p "$REPO_ROOT/experiments/logs"
 cd "$REPO_ROOT"
 
 load_cluster_modules
@@ -245,14 +245,14 @@ trap cleanup EXIT
 if [[ "$START_VLLM" == "1" ]]; then
   echo "[$(date)] Starting local qwen vLLM judge server on port $VLLM_PORT (gpu_fraction=$VLLM_GPU_FRACTION)"
   QWEN3_PORT="$VLLM_PORT" VLLM_GPU_MEMORY_UTILIZATION="$VLLM_GPU_FRACTION" \
-    tools/serve_qwen3_4b_fp8_vllm.sh serve >"logs/vllm_judge_${SLURM_JOB_ID:-manual}.log" 2>&1 &
+    tools/serve_qwen3_4b_fp8_vllm.sh serve >"experiments/logs/vllm_judge_${SLURM_JOB_ID:-manual}.log" 2>&1 &
   VLLM_PID=$!
   : "${MONITOR_BASE_URL:=http://localhost:${VLLM_PORT}/v1}"
   echo "[$(date)] Waiting up to ${VLLM_READY_TIMEOUT_S}s for vLLM (pid $VLLM_PID) ..."
   deadline=$((SECONDS + VLLM_READY_TIMEOUT_S))
   until curl -sf "http://localhost:${VLLM_PORT}/v1/models" >/dev/null 2>&1; do
     if ! kill -0 "$VLLM_PID" 2>/dev/null; then
-      echo "vLLM judge server exited early; see logs/vllm_judge_${SLURM_JOB_ID:-manual}.log" >&2
+      echo "vLLM judge server exited early; see experiments/logs/vllm_judge_${SLURM_JOB_ID:-manual}.log" >&2
       exit 1
     fi
     if [[ "$SECONDS" -ge "$deadline" ]]; then
