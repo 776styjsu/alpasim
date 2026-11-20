@@ -215,7 +215,7 @@ services:
       - "${repo-relative:'plugins'}:/repo/plugins"
       - "${wizard.log_dir}/warp_cache:/mnt/warp"
     environments:
-      - WARP_CACHE_PATH='/mnt/warp'
+      - WARP_CACHE_PATH=/mnt/warp
     command:
       - "uv run physics_server"
       - "--host=0.0.0.0" # again, default container IP
