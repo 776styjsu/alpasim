@@ -1,0 +1,28 @@
+# @package _global_
+# Service and runtime overrides for the scripted driver.
+
+services:
+  driver:
+    command:
+      - "uv run python -m crash_scenes.scripted_driver"
+      - "--plans=${driver.plan_file}"
+      - "--host=0.0.0.0"
+      - "--port={port}"
+
+runtime:
+  endpoints:
+    # A scripted drive needs no images, so nothing is rendered.
+    renderer:
+      skip: true
+  simulation_config:
+    cameras: []
+    render_bundling: NONE
+    # The plan already fixes the path; the driver ignores routes.
+    route_generator_type: "NONE"
+    n_rollouts: 1
+
+# In-runtime evaluation scores camera images and filters its summary on them,
+# so it cannot run without cameras. `python -m crash_scenes label` labels the
+# rollouts instead.
+eval:
+  enabled: false

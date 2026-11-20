@@ -1,0 +1,13 @@
+# Should be used in defaults list, e.g.
+# - /driver: scripted
+
+defaults:
+  - scripted_configs # Runtime and service overrides the scripted driver implies
+  - _self_
+
+# Scripted driver: replays a planned ego path for each scene instead of running
+# a policy. It needs no cameras and no GPU. See docs/CRASH_SCENES.md.
+#
+# The driver follows the plan file `plan.json` in the run directory
+# (`wizard.log_dir`); tools/run_crash_scenes.sh puts it there.
+plan_file: "/mnt/output/plan.json"

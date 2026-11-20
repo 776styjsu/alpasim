@@ -1,0 +1,50 @@
+# @package _global_
+# CPU-only topology for rollouts that need neither a renderer nor a policy
+# model, e.g. driver=scripted. Physics is skipped too: its ground correction
+# runs on a GPU, and it only adjusts height and tilt, not the path on the map.
+
+defines:
+  nre_cache_size: 1 # no renderer runs; the runtime config still reads it
+
+services:
+  # Not launched (see run_sim_services); every topology must still size them.
+  renderer:
+    replicas_per_container: 1
+    gpus: null
+
+  physics:
+    replicas_per_container: 1
+    gpus: null
+
+  trafficsim:
+    replicas_per_container: 1
+    gpus: null
+
+  driver:
+    replicas_per_container: 1
+    gpus: null
+
+  controller:
+    replicas_per_container: 1
+    gpus: null
+
+wizard:
+  run_sim_services: ["driver", "controller", "runtime"]
+
+runtime:
+  nr_workers: 4
+  endpoints:
+    renderer:
+      n_concurrent_rollouts: 4
+      skip: true
+    driver:
+      n_concurrent_rollouts: 4
+    physics:
+      n_concurrent_rollouts: 4
+      skip: true
+    controller:
+      n_concurrent_rollouts: 4
+    trafficsim:
+      n_concurrent_rollouts: 4
+  simulation_config:
+    physics_update_mode: NONE
