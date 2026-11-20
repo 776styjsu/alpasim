@@ -4,8 +4,8 @@
 """Policy event for event-based simulation loop.
 
 Opens the per-step StepContext, gathers observations (egopose, route,
-recording ground truth), queries the driver, and writes the transformed
-trajectory into the context for downstream pipeline events.
+navigation instruction, recording ground truth), queries the driver, and writes
+the transformed trajectory into the context for downstream pipeline events.
 """
 
 from __future__ import annotations
@@ -23,8 +23,10 @@ from alpasim_runtime.events.base import (
 )
 from alpasim_runtime.events.force_gt_utils import controller_reference_trajectory
 from alpasim_runtime.events.state import RolloutState, ServiceBundle
+from alpasim_runtime.nav_route import NO_INSTRUCTION, Navigator
 from alpasim_runtime.route_generator import RouteGenerator
 from alpasim_runtime.telemetry.telemetry_context import try_get_context
+from alpasim_runtime.vectorized_observation import build_vectorized_observation
 from alpasim_utils import geometry
 
 logger = logging.getLogger(__name__)
@@ -33,8 +35,9 @@ logger = logging.getLogger(__name__)
 class PolicyEvent(RecurringEvent):
     """Open per-step context, gather observations, query driver.
 
-    Handles egopose submission, sync tracking, route updates, and recording
-    ground-truth submission.  Everything after the driver query (controller,
+    Handles egopose submission, sync tracking, route updates, navigation
+    instructions, and recording ground-truth submission.  Everything after the
+    driver query (controller,
     physics, traffic, commit) is handled by downstream pipeline events.
     """
 
@@ -48,6 +51,8 @@ class PolicyEvent(RecurringEvent):
         camera_ids: list[str],
         route_generator: RouteGenerator | None,
         send_recording_ground_truth: bool,
+        send_vectorized_observation: bool,
+        navigation: Navigator | None = None,
         consistency_monitor: ConsistencyMonitor | None = None,
     ):
         super().__init__(timestamp_us=timestamp_us)
@@ -55,7 +60,11 @@ class PolicyEvent(RecurringEvent):
         self.services = services
         self.camera_ids = camera_ids
         self.route_generator = route_generator
+        # Source of the turn-by-turn text sent with the observations; None runs
+        # the driver without navigation.
+        self.navigation = navigation
         self.send_recording_ground_truth = send_recording_ground_truth
+        self.send_vectorized_observation = send_vectorized_observation
         self.consistency_monitor = consistency_monitor
 
     async def run(self, state: RolloutState, queue: EventQueue) -> None:
@@ -93,11 +102,15 @@ class PolicyEvent(RecurringEvent):
         dynamics_arr = state.ego_trajectory_estimate.interpolate_dynamics(ts_arr)
         dynamic_states_in_rig = geometry.array_to_dynamic_states(dynamics_arr)
 
-        # Route and ground truth are both expressed in the rig frame at
-        # step_start_us, so the poses they use have to be the ones for this step.
-        # The route needs both trajectories: the true one to place the ego on the
-        # map, the estimate for the frame it is sent in.
-        if self.route_generator is not None or self.send_recording_ground_truth:
+        # Route, navigation and ground truth all locate the ego at step_start_us,
+        # so the poses they use have to be the ones for this step.  The route
+        # needs both trajectories: the true one to place the ego on the map, the
+        # estimate for the frame it is sent in.
+        if (
+            self.route_generator is not None
+            or self.navigation is not None
+            or self.send_recording_ground_truth
+        ):
             latest_us = int(state.ego_trajectory.timestamps_us[-1])
             if latest_us != step_start_us:
                 raise ValueError(
@@ -116,7 +129,22 @@ class PolicyEvent(RecurringEvent):
         ctx.track_task(
             svc.driver.submit_trajectory(ego_trajectory, dynamic_states_in_rig)
         )
+        if self.send_vectorized_observation:
+            pose_local_to_physical_ego = state.ego_trajectory.interpolate(
+                np.array([step_start_us], dtype=np.uint64)
+            ).last_pose
+            ctx.track_task(
+                svc.driver.submit_vectorized_observation(
+                    build_vectorized_observation(
+                        timestamp_us=step_start_us,
+                        vector_map=state.unbound.vector_map,
+                        traffic_objects=state.traffic_objs,
+                        pose_local_to_physical_ego=pose_local_to_physical_ego,
+                    )
+                )
+            )
 
+        route_in_rig: np.ndarray | None = None
         if self.route_generator is not None:
             # Generating the route projects the ego onto the map, which only the
             # true pose locates correctly.  The waypoints then travel to the
@@ -132,7 +160,23 @@ class PolicyEvent(RecurringEvent):
                 pose_local_to_rig_estimated.inverse()
             )
             route = RouteGenerator.prepare_for_policy(route)
+            route_in_rig = route.waypoints
             ctx.track_task(svc.driver.submit_route(step_start_us, route))
+
+        if self.navigation is not None:
+            # Recorded navigation locates the ego along the recorded route from
+            # the true pose; geometry navigation reads the route just generated.
+            instruction = self.navigation.lookup(
+                state.ego_trajectory.last_pose.vec3, route_in_rig
+            )
+            # The driver keeps the last instruction it received, so a step without one
+            # sends the empty instruction rather than leaving a stale one in place.
+            ctx.track_task(
+                svc.driver.submit_navigation(
+                    step_start_us,
+                    instruction if instruction is not None else NO_INSTRUCTION,
+                )
+            )
 
         if self.send_recording_ground_truth:
             gt_traj = state.unbound.gt_ego_trajectory
@@ -142,8 +186,8 @@ class PolicyEvent(RecurringEvent):
                 svc.driver.submit_recording_ground_truth(step_start_us, traj_in_rig)
             )
 
-        # Barrier: all observations (images + egopose + route + GT) must
-        # reach the driver before we call drive().
+        # Barrier: all observations (images + egopose + route + navigation + GT)
+        # must reach the driver before we call drive().
         barrier_start = time.perf_counter()
         await ctx.drain_outstanding_tasks()
         telemetry_ctx = try_get_context()
@@ -156,7 +200,9 @@ class PolicyEvent(RecurringEvent):
         if ctx.force_gt and state.unbound.skip_driver_during_force_gt:
             state.data_sensorsim_to_driver = None
             state.step_context.driver_trajectory = controller_reference_trajectory(
-                state.force_gt_trajectory, step_start_us
+                state.force_gt_trajectory,
+                step_start_us,
+                state.unbound.control_timestep_us,
             )
             return
 
@@ -282,11 +328,6 @@ class PolicyEvent(RecurringEvent):
             [a["score"] for a in attempts],
         )
         return chosen_traj
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def assert_sensors_up_to_date(

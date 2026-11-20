@@ -268,6 +268,7 @@ def _policy_event(service_bundle: ServiceBundle, monitor: Any) -> PolicyEvent:
         camera_ids=["cam_front"],
         route_generator=None,
         send_recording_ground_truth=False,
+        send_vectorized_observation=False,
         consistency_monitor=cast(Any, monitor),
     )
 
