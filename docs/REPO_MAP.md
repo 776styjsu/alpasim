@@ -17,7 +17,7 @@ below exist so that clutter does not creep back.
 | `tools/` | yes | Standalone research scripts and Slurm launchers. Not an importable package; run from the repo root as `python tools/<name>.py` or `sbatch tools/<name>.slurm.sh`. See [tools index](#research-scripts-tools). |
 | `docs/` | yes | All prose documentation, including this file. Research write-ups are in `docs/reasoning_coverage/`; superseded ones in `docs/archive/`. |
 | `plugins/` | yes | Out-of-tree driver plugins (`alpasim_transfuser`, `transfuser_driver`). Workspace members via `plugins/*`. |
-| `data/` | partly | Scene assets, driver checkpoints, NRE artifacts, HF caches. ~494 GB; almost entirely gitignored via `data/.gitignore`. `data/reasoning_coverage/decision_role_proposition_v1.json` is the (untracked) proposition vocabulary read by `reasoning_coverage.parsed_evaluation`. |
+| `data/` | partly | Scene assets, driver checkpoints, NRE artifacts, HF caches. ~494 GB; almost entirely gitignored via `data/.gitignore`. `data/reasoning_coverage/decision_role_proposition_v1.json` is the tracked proposition vocabulary read by `reasoning_coverage.parsed_evaluation`. |
 | `Dockerfile`, `Apptainer.def`, `build_apptainer.sh` | yes | Container builds. The Apptainer pair comes from the `apptainer-support` branch and sits beside `Dockerfile` deliberately; `build_apptainer.sh` writes images to `sif-cache/`. See [APPTAINER.md](APPTAINER.md). |
 | `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md` | yes | Agent instructions (`CLAUDE.md` just includes `AGENTS.md`) and the upstream domain glossary (Run UUID vs Run Name vs NRE Run ID, …). |
 | `.agents/`, `.cursor/`, `.claude/` | partly | Agent skills and editor rules. `.claude/` is local-only. |

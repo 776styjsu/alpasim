@@ -1,0 +1,337 @@
+{
+  "schema_version": "decision-role-proposition-v1",
+  "decisions": {
+    "set_speed_tracking": {
+      "channel": "longitudinal",
+      "modifiers": {
+        "mode": [
+          "maintain",
+          "reach"
+        ]
+      }
+    },
+    "lead_following": {
+      "channel": "longitudinal",
+      "modifiers": {}
+    },
+    "speed_adaptation": {
+      "channel": "longitudinal",
+      "modifiers": {}
+    },
+    "gap_searching": {
+      "channel": "longitudinal",
+      "modifiers": {
+        "intended_maneuver": [
+          "lane_change",
+          "merge",
+          "zipper"
+        ]
+      }
+    },
+    "passing_acceleration": {
+      "channel": "longitudinal",
+      "modifiers": {}
+    },
+    "yield": {
+      "channel": "longitudinal",
+      "modifiers": {}
+    },
+    "stop_for_static_constraint": {
+      "channel": "longitudinal",
+      "modifiers": {}
+    },
+    "lane_keeping": {
+      "channel": "lateral",
+      "modifiers": {}
+    },
+    "merge": {
+      "channel": "lateral",
+      "modifiers": {
+        "direction": [
+          "left",
+          "right"
+        ]
+      }
+    },
+    "split": {
+      "channel": "lateral",
+      "modifiers": {
+        "direction": [
+          "left",
+          "right"
+        ]
+      }
+    },
+    "out_of_lane_nudge": {
+      "channel": "lateral",
+      "modifiers": {
+        "direction": [
+          "left",
+          "right"
+        ]
+      }
+    },
+    "in_lane_nudge": {
+      "channel": "lateral",
+      "modifiers": {
+        "direction": [
+          "left",
+          "right"
+        ]
+      }
+    },
+    "lane_change": {
+      "channel": "lateral",
+      "modifiers": {
+        "direction": [
+          "left",
+          "right"
+        ]
+      }
+    },
+    "pull_over": {
+      "channel": "lateral",
+      "modifiers": {
+        "direction": [
+          "left",
+          "right"
+        ],
+        "purpose": [
+          "pickup",
+          "emergency_stop",
+          "parking_approach"
+        ]
+      }
+    },
+    "turn": {
+      "channel": "lateral",
+      "modifiers": {
+        "kind": [
+          "intersection",
+          "roundabout",
+          "u_turn"
+        ],
+        "direction": [
+          "left",
+          "right"
+        ]
+      }
+    },
+    "lateral_maneuver_abort": {
+      "channel": "lateral",
+      "modifiers": {
+        "canceled_maneuver": [
+          "nudge",
+          "lane_change",
+          "merge",
+          "split",
+          "pull_over"
+        ],
+        "canceled_direction": [
+          "left",
+          "right"
+        ]
+      }
+    }
+  },
+  "roles": [
+    "motivates",
+    "enables",
+    "blocks",
+    "constrains"
+  ],
+  "propositions": {
+    "critical_object": {
+      "type": [
+        "vehicle",
+        "pedestrian",
+        "cyclist",
+        "other_vru"
+      ],
+      "relative_position": [
+        "left",
+        "right"
+      ],
+      "in_path": [
+        true,
+        false
+      ],
+      "at_crosswalk": [
+        true,
+        false
+      ],
+      "oncoming": [
+        true,
+        false
+      ],
+      "motion": [
+        "stopped",
+        "slowing",
+        "crossing"
+      ],
+      "cut_in_risk": [
+        true,
+        false
+      ]
+    },
+    "traffic_signal": {
+      "state": [
+        "red",
+        "yellow",
+        "green"
+      ],
+      "arrow_state": [
+        "red",
+        "yellow",
+        "green",
+        "off"
+      ],
+      "arrow_direction": [
+        "left",
+        "right",
+        "straight"
+      ],
+      "visibility": [
+        "clear",
+        "partially_occluded",
+        "fully_occluded"
+      ],
+      "wait_line_present": [
+        true,
+        false
+      ]
+    },
+    "traffic_control": {
+      "sign_present": [
+        true,
+        false
+      ],
+      "sign_type": [
+        "stop",
+        "yield"
+      ],
+      "control_scope": [
+        "all_way",
+        "two_way"
+      ],
+      "line_type": [
+        "stop",
+        "yield"
+      ],
+      "line_location": [
+        "ahead",
+        "at_ego",
+        "behind"
+      ]
+    },
+    "road_event": {
+      "type": [
+        "curve",
+        "grade",
+        "speed_bump",
+        "narrowing",
+        "roundabout",
+        "ramp",
+        "junction"
+      ],
+      "curve_direction": [
+        "left",
+        "right"
+      ],
+      "grade_direction": [
+        "uphill",
+        "downhill"
+      ],
+      "ahead": [
+        true,
+        false
+      ]
+    },
+    "lane_space": {
+      "lane_count": [
+        "one",
+        "two",
+        "three",
+        "four",
+        "five_or_more"
+      ],
+      "boundary_type": [
+        "dashed",
+        "solid"
+      ],
+      "shoulder_present": [
+        true,
+        false
+      ],
+      "bike_lane_present": [
+        true,
+        false
+      ],
+      "usable_width_m": [
+        "insufficient",
+        "tight",
+        "adequate"
+      ]
+    },
+    "route_intent": {
+      "target_lane": [
+        "current",
+        "adjacent_left",
+        "adjacent_right",
+        "farther_left",
+        "farther_right"
+      ],
+      "movement": [
+        "left_turn",
+        "right_turn",
+        "through"
+      ],
+      "near_term_event": [
+        "split",
+        "merge"
+      ],
+      "required_lane": [
+        "current",
+        "adjacent_left",
+        "adjacent_right",
+        "farther_left",
+        "farther_right"
+      ]
+    },
+    "odd_constraint": {
+      "weather": [
+        "clear",
+        "rain",
+        "snow",
+        "fog"
+      ],
+      "visibility": [
+        "good",
+        "reduced",
+        "poor"
+      ],
+      "construction_present": [
+        true,
+        false
+      ],
+      "emergency_vehicle_present": [
+        true,
+        false
+      ],
+      "rule_source": [
+        "emergency_vehicle",
+        "school_bus",
+        "rail_crossing"
+      ],
+      "required_action": [
+        "stop",
+        "yield",
+        "pull_over"
+      ],
+      "prohibited_action": [
+        "pass",
+        "proceed"
+      ]
+    }
+  }
+}
