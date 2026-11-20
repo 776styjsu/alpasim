@@ -104,14 +104,18 @@ class InitialStepEvent(Event):
 
     async def handle(self, state: RolloutState, queue: EventQueue) -> None:
         del queue
+        # A rollout without cameras starts its policy at the context start, so
+        # the two timestamps coincide and that pose is logged once.
         await log_actor_poses(
             state,
-            np.array(
-                [
-                    state.unbound.egomotion_context_start_us,
-                    state.unbound.first_policy_timestamp_us,
-                ],
-                dtype=np.uint64,
+            np.unique(
+                np.array(
+                    [
+                        state.unbound.egomotion_context_start_us,
+                        state.unbound.first_policy_timestamp_us,
+                    ],
+                    dtype=np.uint64,
+                )
             ),
             self.services.broadcaster,
         )

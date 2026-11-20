@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from alpasim_runtime.events.base import EventQueue
 from alpasim_runtime.events.state import RolloutState, ServiceBundle, StepContext
-from alpasim_runtime.events.step import StepEvent
+from alpasim_runtime.events.step import InitialStepEvent, StepEvent
 from alpasim_utils.geometry import DynamicTrajectory, Pose, Trajectory
 
 
@@ -29,6 +29,39 @@ def _make_trajectory(start_us: int, stop_us: int, step_us: int) -> Trajectory:
         timestamps=np.array(timestamps, dtype=np.uint64),
         poses=poses,
     )
+
+
+class TestInitialStepEvent:
+    """InitialStepEvent logs the rollout's starting state."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("first_policy_timestamp_us", "expected_timestamps_us"),
+        [
+            (200_000, [0, 200_000]),
+            # No cameras: the policy starts at the context start.
+            (0, [0]),
+        ],
+    )
+    async def test_logs_each_starting_timestamp_once(
+        self,
+        rollout_state: RolloutState,
+        service_bundle: ServiceBundle,
+        mock_broadcaster: AsyncMock,
+        first_policy_timestamp_us: int,
+        expected_timestamps_us: list[int],
+    ) -> None:
+        rollout_state.unbound.egomotion_context_start_us = 0
+        rollout_state.unbound.first_policy_timestamp_us = first_policy_timestamp_us
+        event = InitialStepEvent(timestamp_us=0, services=service_bundle)
+
+        await event.handle(rollout_state, EventQueue())
+
+        logged_timestamps_us = [
+            call.args[0].actor_poses.timestamp_us
+            for call in mock_broadcaster.broadcast.call_args_list
+        ]
+        assert logged_timestamps_us == expected_timestamps_us
 
 
 class TestStepEventInitialCase:
